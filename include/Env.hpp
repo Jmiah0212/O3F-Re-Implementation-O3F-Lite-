@@ -53,6 +53,9 @@ public:
 	bool hasObstacleNeighbor() const;
 	bool clearAnyAdjacentObstacle();
 	bool isObstacle(const sf::Vector2i& cell) const;
+	
+	// Task completion check
+	bool isTaskComplete() const { return robotCell == targetCell; }
 
 	// Rendering
 	void render(sf::RenderWindow& window);
