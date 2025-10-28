@@ -3,6 +3,10 @@
 #include <vector>
 #include <SFML/Graphics.hpp>
 
+enum class CellType { Empty, Obstacle, Object, Target, Robot };
+
+enum class Action { Up, Down, Left, Right, None };
+
 struct Object2D {
 	float radius;
 	sf::Vector2f position;
@@ -21,6 +25,9 @@ public:
 	Environment2D(unsigned int width, unsigned int height);
 
 	void reset(unsigned int numObjects);
+	// grid step using primitive action, returns reward
+	float step(Action action);
+	// continuous physics step for legacy behavior
 	void step(float dt);
 
 	// Simple physics-lite interactions
@@ -34,6 +41,13 @@ public:
 	const sf::Vector2f& getTargetRegion() const { return targetRegion; }
 	float getTargetRadius() const { return targetRadius; }
 
+	// Grid accessors
+	int getGridWidth() const { return gridW; }
+	int getGridHeight() const { return gridH; }
+	sf::Vector2i getRobotCell() const { return robotCell; }
+	sf::Vector2i getTargetCell() const { return targetCell; }
+	const std::vector<CellType>& getGrid() const { return grid; }
+
 	// Rendering
 	void render(sf::RenderWindow& window);
 
@@ -46,5 +60,15 @@ private:
 	sf::Vector2f targetRegion;
 	float targetRadius;
 
+	// Grid representation
+	int gridW;
+	int gridH;
+	std::vector<CellType> grid;
+	sf::Vector2i robotCell;
+	sf::Vector2i targetCell;
+
 	void resolveBoundaries(sf::Vector2f& pos, float radius);
+	float computeReward(const sf::Vector2i& prevRobotCell) const;
+	bool isObstacle(const sf::Vector2i& cell) const;
+	int idx(int x, int y) const { return y * gridW + x; }
 };
