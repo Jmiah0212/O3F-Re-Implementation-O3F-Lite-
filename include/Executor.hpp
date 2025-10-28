@@ -1,16 +1,20 @@
 #pragma once
 
 #include <SFML/System/Vector2.hpp>
+#include <functional>
 
 class Environment2D;
+class Option;
 
 enum class Action;
 
 class OptionExecutor {
 public:
-	// Drives low-level motion to follow targets set by options
 	void tick(Environment2D& env, float dt);
 
-	// Execute primitive actions until goal or max steps; returns accumulated reward
-	float runPrimitiveUntil(Environment2D& env, int maxSteps, bool (*goal)(const Environment2D&), Action policy(const Environment2D&));
+	float runPrimitiveUntil(Environment2D& env, int maxSteps,
+		const std::function<bool(const Environment2D&)>& goal,
+		const std::function<Action(const Environment2D&)>& policy);
+
+	float executeOption(Environment2D& env, const Option& option, int maxSteps);
 };

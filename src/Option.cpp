@@ -8,50 +8,78 @@ static float length2(const sf::Vector2f& v) {
 	return v.x * v.x + v.y * v.y;
 }
 
+static Action greedyToCell(const Environment2D& env, const sf::Vector2i& target) {
+	sf::Vector2i r = env.getRobotCell();
+	if (r.x < target.x) return Action::Right;
+	if (r.x > target.x) return Action::Left;
+	if (r.y < target.y) return Action::Down;
+	if (r.y > target.y) return Action::Up;
+	return Action::None;
+}
+
 MoveToTargetOption::MoveToTargetOption() : optionName("MoveToTarget" ) {}
 
 void MoveToTargetOption::onSelect(Environment2D& env) {
-	// Direct the robot toward the target region center
-	env.setRobotTarget(env.getTargetRegion());
+	(void)env;
 }
 
 bool MoveToTargetOption::isComplete(const Environment2D& env) const {
-	// Completed when robot is close to target region
-	auto diff = env.getRobot().position - env.getTargetRegion();
-	return length2(diff) <= (env.getTargetRadius() * env.getTargetRadius());
+	return env.getRobotCell() == env.getTargetCell();
 }
 
-PushNearestObjectOption::PushNearestObjectOption() : optionName("PushNearestObject"), activeObjectIndex(-1) {}
-
-void PushNearestObjectOption::onSelect(Environment2D& env) {
-	// Find nearest object to robot, set target to that object position
-	const auto& objs = env.getObjects();
-	const auto& robot = env.getRobot();
-	float bestD2 = std::numeric_limits<float>::max();
-	int bestIdx = -1;
-	for (int i = 0; i < static_cast<int>(objs.size()); ++i) {
-		float d2 = length2(objs[i].position - robot.position);
-		if (d2 < bestD2) {
-			bestD2 = d2;
-			bestIdx = i;
-		}
-	}
-	activeObjectIndex = bestIdx;
-	if (activeObjectIndex >= 0) {
-		env.setRobotTarget(objs[activeObjectIndex].position);
-	}
+std::function<bool(const Environment2D&)> MoveToTargetOption::goal() const {
+	return [](const Environment2D& e) { return e.getRobotCell() == e.getTargetCell(); };
 }
 
-bool PushNearestObjectOption::isComplete(const Environment2D& env) const {
-	if (activeObjectIndex < 0 || activeObjectIndex >= static_cast<int>(env.getObjects().size())) return true;
-	// Complete if that object is inside target region
-	auto diff = env.getObjects()[activeObjectIndex].position - env.getTargetRegion();
-	return length2(diff) <= (env.getTargetRadius() * env.getTargetRadius());
+std::function<Action(const Environment2D&)> MoveToTargetOption::policy() const {
+	return [](const Environment2D& e) { return greedyToCell(e, e.getTargetCell()); };
+}
+
+ClearObstacleOption::ClearObstacleOption() : optionName("ClearObstacle") {}
+
+void ClearObstacleOption::onSelect(Environment2D& env) {
+	(void)env;
+}
+
+bool ClearObstacleOption::isComplete(const Environment2D& env) const {
+	// Done when no obstacle adjacent
+	return !env.hasObstacleNeighbor();
+}
+
+std::function<bool(const Environment2D&)> ClearObstacleOption::goal() const {
+	return [](const Environment2D& e) { return e.hasObstacleNeighbor(); };
+}
+
+std::function<Action(const Environment2D&)> ClearObstacleOption::policy() const {
+	return [](const Environment2D& e) {
+		// Move greedily toward target; if obstacle neighbor already, None to allow clearing
+		if (e.hasObstacleNeighbor()) return Action::None;
+		return greedyToCell(e, e.getTargetCell());
+	};
+}
+
+GraspTargetOption::GraspTargetOption() : optionName("GraspTarget") {}
+
+void GraspTargetOption::onSelect(Environment2D& env) {
+	(void)env;
+}
+
+bool GraspTargetOption::isComplete(const Environment2D& env) const {
+	return env.getRobotCell() == env.getTargetCell();
+}
+
+std::function<bool(const Environment2D&)> GraspTargetOption::goal() const {
+	return [](const Environment2D& e) { return e.getRobotCell() == e.getTargetCell(); };
+}
+
+std::function<Action(const Environment2D&)> GraspTargetOption::policy() const {
+	return [](const Environment2D& e) { return greedyToCell(e, e.getTargetCell()); };
 }
 
 std::vector<std::unique_ptr<Option>> makeDefaultOptions() {
 	std::vector<std::unique_ptr<Option>> opts;
+	opts.emplace_back(new ClearObstacleOption());
 	opts.emplace_back(new MoveToTargetOption());
-	opts.emplace_back(new PushNearestObjectOption());
+	opts.emplace_back(new GraspTargetOption());
 	return opts;
 }

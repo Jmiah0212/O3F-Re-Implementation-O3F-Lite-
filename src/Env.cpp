@@ -57,15 +57,40 @@ bool Environment2D::isObstacle(const sf::Vector2i& cell) const {
 	return t == CellType::Obstacle;
 }
 
+bool Environment2D::hasObstacleNeighbor() const {
+	static const int dx[4] = {1, -1, 0, 0};
+	static const int dy[4] = {0, 0, 1, -1};
+	for (int k = 0; k < 4; ++k) {
+		int nx = robotCell.x + dx[k];
+		int ny = robotCell.y + dy[k];
+		if (nx >= 0 && nx < gridW && ny >= 0 && ny < gridH) {
+			if (grid[idx(nx, ny)] == CellType::Obstacle) return true;
+		}
+	}
+	return false;
+}
+
+bool Environment2D::clearAnyAdjacentObstacle() {
+	static const int dx[4] = {1, -1, 0, 0};
+	static const int dy[4] = {0, 0, 1, -1};
+	for (int k = 0; k < 4; ++k) {
+		int nx = robotCell.x + dx[k];
+		int ny = robotCell.y + dy[k];
+		if (nx >= 0 && nx < gridW && ny >= 0 && ny < gridH) {
+			if (grid[idx(nx, ny)] == CellType::Obstacle) {
+				grid[idx(nx, ny)] = CellType::Empty;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 float Environment2D::computeReward(const sf::Vector2i& prevRobotCell) const {
 	float r = 0.f;
-	// +10 for reaching target
 	if (robotCell == targetCell) r += 10.f;
-	// -0.1 per step
 	r -= 0.1f;
-	// -5 for collision with obstacle (if attempted)
 	if (isObstacle(robotCell)) r -= 5.f;
-	// +1 when distance to target decreases
 	auto dprev = std::abs(prevRobotCell.x - targetCell.x) + std::abs(prevRobotCell.y - targetCell.y);
 	auto dnow = std::abs(robotCell.x - targetCell.x) + std::abs(robotCell.y - targetCell.y);
 	if (dnow < dprev) r += 1.f;
@@ -86,20 +111,16 @@ float Environment2D::step(Action action) {
 		case Action::Right: next.x += 1; break;
 		default: break;
 	}
-	// clamp into bounds
 	next.x = std::max(0, std::min(gridW - 1, next.x));
 	next.y = std::max(0, std::min(gridH - 1, next.y));
-	// move if not obstacle
 	if (!isObstacle(next)) {
 		robotCell = next;
 	}
-	// write back robot cell
 	if (grid[idx(targetCell.x, targetCell.y)] != CellType::Robot) {
 		grid[idx(targetCell.x, targetCell.y)] = CellType::Target;
 	}
 	grid[idx(robotCell.x, robotCell.y)] = CellType::Robot;
 
-	// sync continuous visualization positions
 	robot.position = {robotCell.x * CELL_SIZE + CELL_SIZE * 0.5f, robotCell.y * CELL_SIZE + CELL_SIZE * 0.5f};
 	robotTarget = robot.position;
 	return computeReward(prev);
@@ -117,7 +138,6 @@ void Environment2D::resolveBoundaries(sf::Vector2f& pos, float r) {
 }
 
 void Environment2D::step(float dt) {
-	// Legacy continuous: keep for smooth visuals while grid drives logic
 	sf::Vector2f toTarget = robotTarget - robot.position;
 	sf::Vector2f dir = normalize(toTarget);
 	robot.velocity = dir * robot.maxSpeed;
@@ -126,7 +146,6 @@ void Environment2D::step(float dt) {
 }
 
 void Environment2D::render(sf::RenderWindow& window) {
-	// draw grid
 	sf::RectangleShape cellShape({CELL_SIZE - 1.f, CELL_SIZE - 1.f});
 	for (int y = 0; y < gridH; ++y) {
 		for (int x = 0; x < gridW; ++x) {
@@ -141,6 +160,4 @@ void Environment2D::render(sf::RenderWindow& window) {
 			window.draw(cellShape);
 		}
 	}
-
-	// continuous overlays (optional) already visible via cell colors
 }

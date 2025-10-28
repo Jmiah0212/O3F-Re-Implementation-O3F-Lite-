@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <functional>
 #include <SFML/Graphics.hpp>
 
 enum class CellType { Empty, Obstacle, Object, Target, Robot };
@@ -48,6 +49,11 @@ public:
 	sf::Vector2i getTargetCell() const { return targetCell; }
 	const std::vector<CellType>& getGrid() const { return grid; }
 
+	// Obstacle helpers
+	bool hasObstacleNeighbor() const;
+	bool clearAnyAdjacentObstacle();
+	bool isObstacle(const sf::Vector2i& cell) const;
+
 	// Rendering
 	void render(sf::RenderWindow& window);
 
@@ -69,6 +75,5 @@ private:
 
 	void resolveBoundaries(sf::Vector2f& pos, float radius);
 	float computeReward(const sf::Vector2i& prevRobotCell) const;
-	bool isObstacle(const sf::Vector2i& cell) const;
 	int idx(int x, int y) const { return y * gridW + x; }
 };
