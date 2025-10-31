@@ -9,7 +9,7 @@ int main() {
 
     // locate target & goal
     Pos target, goal;
-    for(int y=0; y<env.s.H; y++) {
+    for(int y=0; y<env.s.H; y++)
         for(int x=0; x<env.s.W; x++) {
             if(env.s.grid[y*env.s.W + x] == TARGET) target = {x,y};
             if(env.s.grid[y*env.s.W + x] == GOAL) goal = {x,y};
