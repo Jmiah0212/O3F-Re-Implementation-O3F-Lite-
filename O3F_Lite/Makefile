@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O2 -Wall
+CXXFLAGS = -std=c++17 -O3 -march=native -DNDEBUG -Wall
 
 OBJS = main.o env.o option_executor.o option_planner.o
 

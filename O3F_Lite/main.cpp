@@ -16,7 +16,7 @@ struct TrainConfig {
 int main(){
     // -------- TRAINING --------
     TrainConfig cfg;
-    cfg.episodes = 50;
+    cfg.episodes = 500;
     cfg.gamma = 0.95;
     cfg.eps_start = 0.3;
     cfg.eps_end = 0.05;
@@ -34,7 +34,7 @@ int main(){
 
         env.reset_random();
         double G = 0.0;
-        int start_sid = planner.state_id(env);
+        //int start_sid = planner.state_id(env);
 
         while (!env.is_terminal()){
             int s_id = planner.state_id(env);
@@ -68,7 +68,7 @@ int main(){
     cout << "\nTraining complete. Logged to " << logpath << "\n\n";
 
     // -------- DEMO (GREEDY) --------
-    env.reset_random(6,6,4);
+    env.reset_random();
     cout << "Initial state:\n";
     env.render();
 
