@@ -68,7 +68,7 @@ int main(){
     cout << "\nTraining complete. Logged to " << logpath << "\n\n";
 
     // -------- DEMO (GREEDY) --------
-    env.reset_random();
+    env.reset_random(6,6,4);
     cout << "Initial state:\n";
     env.render();
 
