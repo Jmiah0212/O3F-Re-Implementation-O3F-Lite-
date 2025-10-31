@@ -7,20 +7,24 @@
 
 using namespace std;
 struct TrainConfig {
-    int episodes = 300;      // feel free to increase to 2000+ to learn more robustly
-    double gamma = 0.97;
-    double eps_start = 0.30;
-    double eps_end   = 0.02;
+    int episodes;      // feel free to increase to 2000+ to learn more robustly
+    double gamma;
+    double eps_start;
+    double eps_end;   
 };
 
 int main(){
     // -------- TRAINING --------
     TrainConfig cfg;
+    cfg.episodes = 50;
+    cfg.gamma = 0.95;
+    cfg.eps_start = 0.3;
+    cfg.eps_end = 0.05;
     Env env;
     OptionExecutor exec;
     OptionPlannerQL planner(123);
 
-    const std::string logpath = "o3f_train.csv";
+    const string logpath = "o3f_train.csv";
     csv_write_header(logpath, "episode,return,steps,success,epsilon");
 
     for (int ep=1; ep<=cfg.episodes; ++ep){

@@ -1,7 +1,7 @@
 #include "env.hpp"
 using namespace std;
 
-void Env::reset_random(int W,int H,int num_obst){
+void Env::reset_random(int W=6,int H=6,int num_obst=3){
     s = {};
     s.W=W; s.H=H; s.grid.assign(W*H,EMPTY);
     uniform_int_distribution<int> dx(0, W-1), dy(0, H-1);
