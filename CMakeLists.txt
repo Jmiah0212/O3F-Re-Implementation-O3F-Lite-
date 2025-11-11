@@ -33,4 +33,3 @@ if(WIN32)
 		COMMAND ${CMAKE_COMMAND} -E echo "Ensure SFML DLLs are on PATH or next to the exe."
 	)
 endif()
-

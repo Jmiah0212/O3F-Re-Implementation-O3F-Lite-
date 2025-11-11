@@ -81,4 +81,3 @@ void OptionPlanner::update(const Environment2D& prevEnv, int actionIdx, float re
 	float td = reward + config.gamma * maxNext - q[actionIdx];
 	q[actionIdx] += config.alpha * td;
 }
-

@@ -31,4 +31,3 @@ private:
 	int currentOptionIdx;
 	float timeSinceSelect;
 };
-
