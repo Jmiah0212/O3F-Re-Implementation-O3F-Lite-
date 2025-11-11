@@ -1,2 +1,64 @@
-# O3F-Re-Implementation-O3F-Lite-
-The re-implementation of The 2023 IROS paper "Object-Oreiented Option Framework (O3F) for Manipulation in Clutter" from Python + PPO to C++
+# O3F-Lite (CSCE 4430)
+
+A minimal C++/SFML re-implementation inspired by the IEEE IROS 2023 paper "Object-Oriented Option Framework for Robotics Manipulation in Clutter (O3F)". This demo shows:
+
+- State representation of a 2D world (robot, objects)
+- Option hierarchy: an Option Planner selects high-level options; an Executor handles low-level motion
+- Reward shaping: success (objects in target region), proximity, time penalty
+- Reinforcement learning: a simplified Q-learning planner over discrete options
+- Visualization via SFML
+
+## Build (Windows, CMake + vcpkg)
+
+1. Install dependencies:
+   - Visual Studio 2019/2022 with C++ workload
+   - CMake 3.20+
+   - vcpkg
+
+2. Install SFML via vcpkg:
+
+   ```powershell
+   .\vcpkg\vcpkg.exe install sfml:x64-windows
+   ```
+
+3. Configure and build:
+
+   ```powershell
+   $triplet = "x64-windows"
+   $toolchain = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=$toolchain -DVCPKG_TARGET_TRIPLET=$triplet
+   cmake --build build --config Release
+   ```
+
+4. Run:
+
+   ```powershell
+   .\build\Release\o3f_lite.exe
+   ```
+
+If DLLs are missing, ensure that vcpkg's installed `bin` directory is on your PATH or copy required SFML DLLs next to the executable.
+
+## Build (Linux, apt)
+
+Install SFML 2.5+ and build with CMake:
+
+```bash
+sudo apt update && sudo apt install -y libsfml-dev cmake build-essential
+cmake -S . -B build
+cmake --build build -j
+./build/o3f_lite
+```
+
+## Controls
+
+- R: Reset random scene
+- Window close button: exit
+
+## Architecture
+
+- Environment: 2D grid world; objects, robot state; reward/state transitions
+- Agent: owns planner and executor; runs episodes and learning updates
+- OptionPlanner: epsilon-greedy Q-learning over high-level options
+- OptionExecutor: drives low-level motion via environment targets
+- Visualizer: SFML window, events, and drawing
+
