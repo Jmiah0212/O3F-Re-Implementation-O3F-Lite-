@@ -19,6 +19,9 @@ struct PlannerConfig {
 class OptionPlanner {
 public:
 	OptionPlanner(PlannerConfig cfg);
+	// Save/load Q-table to CSV. CSV rows: state,q0,q1,...
+	bool saveQTable(const std::string& path) const;
+	bool loadQTable(const std::string& path);
 	// Access to internal config so callers can read/update epsilon, decay, etc.
 	PlannerConfig& getConfig() { return config; }
 	const PlannerConfig& getConfig() const { return config; }

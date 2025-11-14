@@ -5,6 +5,10 @@
 #include <SFML/System/Vector2.hpp>
 #include <cmath>
 #include <random>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
 
 OptionPlanner::OptionPlanner(PlannerConfig cfg) : config(cfg) {}
 
@@ -48,10 +52,14 @@ std::string OptionPlanner::discretize(const Environment2D& env) const {
 	
 	// Include whether obstacles are nearby (boolean features)
 	bool hasObstacle = env.hasObstacleNeighbor();
+
+	// Include whether robot is carrying an object
+	bool carrying = env.isCarrying();
 	
 	return std::to_string(distBucket) + ":" + 
 	       std::to_string(direction) + ":" + 
-	       std::to_string(hasObstacle ? 1 : 0);
+	       std::to_string(hasObstacle ? 1 : 0) + ":" +
+	       std::to_string(carrying ? 1 : 0);
 }
 
 int OptionPlanner::selectAction(const Environment2D& env, const std::vector<std::unique_ptr<Option>>& options) {
@@ -81,3 +89,52 @@ void OptionPlanner::update(const Environment2D& prevEnv, int actionIdx, float re
 	float td = reward + config.gamma * maxNext - q[actionIdx];
 	q[actionIdx] += config.alpha * td;
 }
+
+bool OptionPlanner::saveQTable(const std::string& path) const {
+	std::ofstream out(path);
+	if (!out.is_open()) {
+		std::cerr << "Failed to open Q-table file for writing: " << path << std::endl;
+		return false;
+	}
+	// write rows as: state,q0,q1,...
+	out << std::fixed << std::setprecision(6);
+	for (const auto& kv : qTable) {
+		out << kv.first;
+		for (float q : kv.second) {
+			out << "," << q;
+		}
+		out << "\n";
+	}
+	out.close();
+	return true;
+}
+
+bool OptionPlanner::loadQTable(const std::string& path) {
+	std::ifstream in(path);
+	if (!in.is_open()) {
+		std::cerr << "Failed to open Q-table file for reading: " << path << std::endl;
+		return false;
+	}
+	qTable.clear();
+	std::string line;
+	while (std::getline(in, line)) {
+		if (line.empty()) continue;
+		std::istringstream ss(line);
+		std::string state;
+		if (!std::getline(ss, state, ',')) continue;
+		std::vector<float> qs;
+		std::string token;
+		while (std::getline(ss, token, ',')) {
+			try {
+				float v = std::stof(token);
+				qs.push_back(v);
+			} catch (...) {
+				// skip invalid token
+			}
+		}
+		if (!qs.empty()) qTable[state] = qs;
+	}
+	in.close();
+	return true;
+}
+

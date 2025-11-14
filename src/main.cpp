@@ -12,8 +12,20 @@
 #include "Executor.hpp"
 #include "Option.hpp"
 
-int main() {
+int main(int argc, char** argv) {
 	const unsigned int W = 960, H = 600;
+	// Parse simple CLI args
+	std::string loadQPath;
+	int saveQInterval = 0; // episodes; 0 = disabled
+	for (int i = 1; i < argc; ++i) {
+		std::string a = argv[i];
+		if (a == "--load-q" && i + 1 < argc) {
+			loadQPath = argv[++i];
+		} else if (a == "--save-q-interval" && i + 1 < argc) {
+			saveQInterval = std::stoi(argv[++i]);
+		}
+	}
+
 	Environment2D env(W, H);
 	env.reset(5);
 
@@ -26,6 +38,15 @@ int main() {
 	plannerCfg.epsilonDecay = 0.995f;
 	plannerCfg.epsilonMin = 0.05f;
 	OptionPlanner planner(plannerCfg);
+
+	// Optionally load a Q-table before training
+	if (!loadQPath.empty()) {
+		if (planner.loadQTable(loadQPath)) {
+			std::cout << "Loaded Q-table from " << loadQPath << std::endl;
+		} else {
+			std::cout << "Failed to load Q-table from " << loadQPath << std::endl;
+		}
+	}
 
 	// Create CSV log for training results
 	std::time_t now = std::time(nullptr);
@@ -128,8 +149,33 @@ int main() {
 		planner.getConfig().epsilon = std::max(
 			planner.getConfig().epsilon * planner.getConfig().epsilonDecay,
 			planner.getConfig().epsilonMin);
+
+		// Periodically save Q-table if requested
+		if (saveQInterval > 0 && episode % saveQInterval == 0) {
+			std::time_t now2 = std::time(nullptr);
+			std::tm* lt = std::localtime(&now2);
+			char ts[64];
+			std::strftime(ts, sizeof(ts), "%Y%m%d_%H%M", lt);
+			std::string qfilename = std::string("qtable_") + ts + "_ep" + std::to_string(episode) + ".csv";
+			if (planner.saveQTable(qfilename)) {
+				std::cout << "Saved Q-table to " << qfilename << std::endl;
+			} else {
+				std::cout << "Failed to save Q-table to " << qfilename << std::endl;
+			}
+		}
 	}
 	
+	// Save final Q-table
+	{
+		std::time_t now3 = std::time(nullptr);
+		std::tm* lt3 = std::localtime(&now3);
+		char ts3[64];
+		std::strftime(ts3, sizeof(ts3), "%Y%m%d_%H%M", lt3);
+		std::string finalQ = std::string("qtable_final_") + ts3 + ".csv";
+		if (planner.saveQTable(finalQ)) std::cout << "Saved final Q-table to " << finalQ << std::endl;
+		else std::cout << "Failed to save final Q-table to " << finalQ << std::endl;
+	}
+
 	std::cout << "\nTraining complete!" << std::endl;
 	std::cout << "Total successful episodes: " << successfulEpisodes << " / " << MAX_EPISODES << std::endl;
 	std::cout << "Success rate: " << (float)successfulEpisodes / MAX_EPISODES * 100 << "%" << std::endl;
