@@ -115,16 +115,17 @@ int main(int argc, char** argv) {
 			int option = currentPhase;
 			
 			// Special handling for Phase 2 (ReturnToObject):
-			// If we're at the object cell, we should have picked it up (next loop transition check)
-			// If we're adjacent to object, move to it instead of clearing obstacles
+			// Prefer the ReturnToObject option unless its policy reports no available move
+			// (i.e. it's blocked). Only then do we fall back to ClearObstacle.
 			if (currentPhase == 2) {
-				// If robot is adjacent to object, don't clear - just move to object
-				int dx = env.getObjectCell().x - env.getRobotCell().x;
-				int dy = env.getObjectCell().y - env.getRobotCell().y;
-				bool adjacentToObject = (std::abs(dx) + std::abs(dy) == 1);
-				
-				if (!adjacentToObject && !env.isCarrying() && env.hasObstacleNeighbor()) {
-					option = 0; // ClearObstacle only if NOT adjacent
+				// Query the ReturnToObject policy to see if it can move toward the object
+				auto returnPolicy = options[2]->policy();
+				Action intended = returnPolicy(env);
+
+				if (intended == Action::None && !env.isCarrying()) {
+					// The policy indicates the agent cannot progress toward the object
+					// (blocked). Allow clearing so the agent can create a path.
+					option = 0; // ClearObstacle
 				} else {
 					option = 2; // ReturnToObject - move toward object
 				}

@@ -242,9 +242,63 @@ std::function<bool(const Environment2D&)> ReturnToObjectOption::goal() const {
 }
 
 std::function<Action(const Environment2D&)> ReturnToObjectOption::policy() const {
-	return [](const Environment2D& e) { 
-		// Always move toward the object location until we pick it up
-		return smartPathfinding(e, e.getObjectCell()); 
+	return [](const Environment2D& e) {
+		// Try to move directly toward the object
+		Action a = smartPathfinding(e, e.getObjectCell());
+		if (a != Action::None) return a;
+
+		// If we're fully blocked (no immediate unblocked neighbor), actively seek
+		// a nearby obstacle that lies roughly toward the object and approach a
+		// free cell adjacent to it so the ClearObstacle option can clear it.
+
+		const int maxSearchRadius = 8;
+		sf::Vector2i robot = e.getRobotCell();
+		sf::Vector2i object = e.getObjectCell();
+
+		// Find the best obstacle: prefer obstacles that are closer to the object
+		// and reasonably near the robot.
+		bool found = false;
+		sf::Vector2i bestObs(0,0);
+		float bestScore = std::numeric_limits<float>::infinity();
+
+		for (int dx = -maxSearchRadius; dx <= maxSearchRadius; ++dx) {
+			for (int dy = -maxSearchRadius; dy <= maxSearchRadius; ++dy) {
+				sf::Vector2i pos(robot.x + dx, robot.y + dy);
+				if (pos.x < 0 || pos.x >= e.getGridWidth() || pos.y < 0 || pos.y >= e.getGridHeight()) continue;
+				if (!e.isObstacle(pos)) continue;
+
+				// score = distance from robot + small weight * distance from obstacle to object
+				float dr = std::hypot((float)(pos.x - robot.x), (float)(pos.y - robot.y));
+				float do_ = std::hypot((float)(pos.x - object.x), (float)(pos.y - object.y));
+				float score = dr + 0.5f * do_;
+
+				if (score < bestScore) {
+					bestScore = score;
+					bestObs = pos;
+					found = true;
+				}
+			}
+		}
+
+		if (!found) {
+			// No nearby obstacles found; fallback to staying still
+			return Action::None;
+		}
+
+		// Find a free neighbor cell adjacent to the chosen obstacle to approach
+		static const int ndx[4] = {1, -1, 0, 0};
+		static const int ndy[4] = {0, 0, 1, -1};
+		for (int k = 0; k < 4; ++k) {
+			sf::Vector2i adj(bestObs.x + ndx[k], bestObs.y + ndy[k]);
+			if (adj.x < 0 || adj.x >= e.getGridWidth() || adj.y < 0 || adj.y >= e.getGridHeight()) continue;
+			if (e.isObstacle(adj)) continue; // must be free to stand on
+
+			// Return an action toward that adjacent free cell
+			return smartPathfinding(e, adj);
+		}
+
+		// If no adjacent free cell found (obstacle enclosed), stay still
+		return Action::None;
 	};
 }
 
