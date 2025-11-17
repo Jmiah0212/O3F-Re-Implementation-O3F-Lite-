@@ -26,6 +26,8 @@ Environment2D::Environment2D(unsigned int width_, unsigned int height_)
 	grid.assign(gridW * gridH, CellType::Empty);
 	robotCell = {1, gridH / 2};
 	targetCell = {gridW - 2, gridH / 2};
+	objectCell = {gridW / 3, gridH / 2};
+	carrying = false;
 }
 
 void Environment2D::reset(unsigned int numObjects) {
@@ -39,6 +41,12 @@ void Environment2D::reset(unsigned int numObjects) {
 	std::uniform_int_distribution<int> targetX(gridW - 5, gridW - 2); // Right side
 	std::uniform_int_distribution<int> targetY(2, gridH - 3); // Avoid edges
 	targetCell = {targetX(rng), targetY(rng)};
+
+	// Place a single object somewhere else (left/middle side)
+	std::uniform_int_distribution<int> objX(2, std::max(2, gridW/2 - 2));
+	std::uniform_int_distribution<int> objY(2, gridH - 3);
+	objectCell = {objX(rng), objY(rng)};
+	carrying = false;
 	
 	// Generate obstacles
 	std::uniform_int_distribution<int> ox(1, gridW - 2);
@@ -47,9 +55,12 @@ void Environment2D::reset(unsigned int numObjects) {
 	for (int i = 0; i < gridW * gridH / 2; ++i) {
 		sf::Vector2i c{ox(rng), oy(rng)};
 		if (c == robotCell || c == targetCell) continue;
+		// avoid placing obstacles on the object cell
+		if (c == objectCell) continue;
 		grid[idx(c.x, c.y)] = CellType::Obstacle;
 	}
 	grid[idx(targetCell.x, targetCell.y)] = CellType::Target;
+	grid[idx(objectCell.x, objectCell.y)] = CellType::Object;
 	grid[idx(robotCell.x, robotCell.y)] = CellType::Robot;
 
 	// Debug: print robot and target positions
@@ -85,6 +96,9 @@ bool Environment2D::hasObstacleNeighbor() const {
 bool Environment2D::clearAnyAdjacentObstacle() {
 	static const int dx[4] = {1, -1, 0, 0};
 	static const int dy[4] = {0, 0, 1, -1};
+	// cannot clear obstacles while carrying an object
+	if (carrying) return false;
+
 	for (int k = 0; k < 4; ++k) {
 		int nx = robotCell.x + dx[k];
 		int ny = robotCell.y + dy[k];
@@ -102,8 +116,8 @@ bool Environment2D::clearAnyAdjacentObstacle() {
 float Environment2D::computeReward(const sf::Vector2i& prevRobotCell) const {
 	float r = 0.f;
 	
-	// 1. Success reward for reaching target (large bonus)
-	if (robotCell == targetCell) {
+	// 1. Success reward for delivering the carried object to target (large bonus)
+	if (carrying && robotCell == targetCell) {
 		return 50.f; // Big reward to end episode
 	}
 	
@@ -191,6 +205,13 @@ float Environment2D::step(Action action) {
 	next.y = std::max(0, std::min(gridH - 1, next.y));
 	if (!isObstacle(next)) {
 		robotCell = next;
+	}
+	// If robot moved onto the object cell and not already carrying, pick it up
+	if (!carrying && robotCell == objectCell) {
+		carrying = true;
+		// remove object from grid
+		grid[idx(objectCell.x, objectCell.y)] = CellType::Empty;
+		std::cout << "Env: robot picked up object at (" << objectCell.x << "," << objectCell.y << ")" << std::endl;
 	}
 	if (grid[idx(targetCell.x, targetCell.y)] != CellType::Robot) {
 		grid[idx(targetCell.x, targetCell.y)] = CellType::Target;

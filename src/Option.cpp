@@ -87,6 +87,7 @@ void MoveToTargetOption::onSelect(Environment2D& env) {
 }
 
 bool MoveToTargetOption::isComplete(const Environment2D& env) const {
+	// Used by executor to detect early completion
 	return env.getRobotCell() == env.getTargetCell();
 }
 
@@ -98,6 +99,7 @@ std::function<bool(const Environment2D&)> MoveToTargetOption::goal() const {
 
 std::function<Action(const Environment2D&)> MoveToTargetOption::policy() const {
 	return [](const Environment2D& e) { 
+		// Move toward target, ignore obstacles and objects
 		return smartPathfinding(e, e.getTargetCell()); 
 	};
 }
@@ -109,6 +111,8 @@ void ClearObstacleOption::onSelect(Environment2D& env) {
 }
 
 bool ClearObstacleOption::isComplete(const Environment2D& env) const {
+	// If carrying, we consider this option complete (can't/shouldn't clear while carrying)
+	if (env.isCarrying()) return true;
 	return !env.hasObstacleNeighbor();
 }
 
@@ -123,6 +127,11 @@ std::function<Action(const Environment2D&)> ClearObstacleOption::policy() const 
 		// This option should only execute when there's an obstacle to clear
 		if (!e.hasObstacleNeighbor()) {
 			// Move toward target if no obstacle nearby
+			return smartPathfinding(e, e.getTargetCell());
+		}
+
+		// If carrying, do not attempt to clear; instead move toward target
+		if (e.isCarrying()) {
 			return smartPathfinding(e, e.getTargetCell());
 		}
 		
@@ -156,32 +165,95 @@ std::function<Action(const Environment2D&)> ClearObstacleOption::policy() const 
 	};
 }
 
-GraspTargetOption::GraspTargetOption() : optionName("GraspTarget") {}
+MoveToObjectOption::MoveToObjectOption() : optionName("MoveToObject") {}
 
-void GraspTargetOption::onSelect(Environment2D& env) {
+void MoveToObjectOption::onSelect(Environment2D& env) {
 	(void)env;
 }
 
-bool GraspTargetOption::isComplete(const Environment2D& env) const {
-	return env.getRobotCell() == env.getTargetCell();
+bool MoveToObjectOption::isComplete(const Environment2D& env) const {
+	return env.getRobotCell() == env.getObjectCell();
 }
 
-std::function<bool(const Environment2D&)> GraspTargetOption::goal() const {
+std::function<bool(const Environment2D&)> MoveToObjectOption::goal() const {
 	return [](const Environment2D& e) { 
-		return e.getRobotCell() == e.getTargetCell(); 
+		return e.getRobotCell() == e.getObjectCell(); 
 	};
 }
 
-std::function<Action(const Environment2D&)> GraspTargetOption::policy() const {
+std::function<Action(const Environment2D&)> MoveToObjectOption::policy() const {
 	return [](const Environment2D& e) { 
-		return smartPathfinding(e, e.getTargetCell()); 
+		return smartPathfinding(e, e.getObjectCell()); 
+	};
+}
+
+MoveObjectToTargetOption::MoveObjectToTargetOption() : optionName("MoveObjectToTarget"), objectPickupLocation(-1, -1) {}
+
+void MoveObjectToTargetOption::onSelect(Environment2D& env) {
+	// Remember where we picked up the object
+	if (env.isCarrying()) {
+		objectPickupLocation = env.getObjectCell();
+	}
+}
+
+bool MoveObjectToTargetOption::isComplete(const Environment2D& env) const {
+	// Complete when we're at target AND carrying the object
+	return env.isTaskComplete();
+}
+
+std::function<bool(const Environment2D&)> MoveObjectToTargetOption::goal() const {
+	return [](const Environment2D& e) { 
+		return e.isTaskComplete();
+	};
+}
+
+std::function<Action(const Environment2D&)> MoveObjectToTargetOption::policy() const {
+	return [this](const Environment2D& e) {
+		// If carrying, move toward target
+		if (e.isCarrying()) {
+			return smartPathfinding(e, e.getTargetCell());
+		}
+		
+		// If not carrying but we know where the object is, go back for it
+		if (objectPickupLocation.x != -1 && objectPickupLocation.y != -1) {
+			return smartPathfinding(e, objectPickupLocation);
+		}
+		
+		// Fallback: move toward target anyway
+		return smartPathfinding(e, e.getTargetCell());
+	};
+}
+
+ReturnToObjectOption::ReturnToObjectOption() : optionName("ReturnToObject") {}
+
+void ReturnToObjectOption::onSelect(Environment2D& env) {
+	(void)env;
+}
+
+bool ReturnToObjectOption::isComplete(const Environment2D& env) const {
+	// Complete when carrying the object
+	return env.isCarrying();
+}
+
+std::function<bool(const Environment2D&)> ReturnToObjectOption::goal() const {
+	return [](const Environment2D& e) { 
+		return e.isCarrying();
+	};
+}
+
+std::function<Action(const Environment2D&)> ReturnToObjectOption::policy() const {
+	return [](const Environment2D& e) { 
+		// Always move toward the object location until we pick it up
+		return smartPathfinding(e, e.getObjectCell()); 
 	};
 }
 
 std::vector<std::unique_ptr<Option>> makeDefaultOptions() {
 	std::vector<std::unique_ptr<Option>> opts;
-	opts.emplace_back(new MoveToTargetOption());
+	// New order: clear obstacles, go to target, return to object, then bring object to target
 	opts.emplace_back(new ClearObstacleOption());
-	opts.emplace_back(new GraspTargetOption());
+	opts.emplace_back(new MoveToTargetOption());
+	opts.emplace_back(new ReturnToObjectOption());
+	opts.emplace_back(new MoveObjectToTargetOption());
 	return opts;
 }

@@ -73,6 +73,10 @@ int main(int argc, char** argv) {
 		int optionCount = 0;
 		const int MAX_OPTIONS_PER_EPISODE = 50; // Force episode to end after 50 options
 		
+		// State machine: 0=ClearObstacles, 1=MoveToTarget, 2=ReturnToObject, 3=MoveObjectToTarget
+		int currentPhase = 0;
+		const char* phaseNames[] = {"ClearObstacle", "MoveToTarget", "ReturnToObject", "MoveObjectToTarget"};
+		
 		int stepsWithoutProgress = 0;
 		int lastDistance = std::abs(env.getRobotCell().x - env.getTargetCell().x) + 
 		                   std::abs(env.getRobotCell().y - env.getTargetCell().y);
@@ -81,20 +85,97 @@ int main(int argc, char** argv) {
 			bool shouldClose = false, resetRequested = false;
 			viz.pollEvents(shouldClose, resetRequested);
 			if (shouldClose) break;
-			if (resetRequested) env.reset(5);
+			if (resetRequested) {
+				env.reset(5);
+				currentPhase = 0;
+			}
 
-			int option = planner.selectOption(env, options);
+			// Check phase transition conditions FIRST, before executing any option
+			// This ensures we immediately transition when conditions are met
+			if (currentPhase == 0) {
+				// ClearObstacles phase: transition when no obstacles nearby
+				if (!env.hasObstacleNeighbor()) {
+					currentPhase = 1;
+				}
+			} else if (currentPhase == 1) {
+				// MoveToTarget phase: transition when at target
+				if (env.getRobotCell() == env.getTargetCell()) {
+					currentPhase = 2;
+					std::cout << "Episode " << episode << " - Reached target! Transitioning to ReturnToObject phase." << std::endl;
+				}
+			} else if (currentPhase == 2) {
+				// ReturnToObject phase: transition when carrying object
+				if (env.isCarrying()) {
+					currentPhase = 3;
+					std::cout << "Episode " << episode << " - Picked up object! Transitioning to MoveObjectToTarget phase." << std::endl;
+				}
+			}
+
+			// Determine which option to execute based on current phase
+			int option = currentPhase;
+			
+			// Special handling for Phase 2 (ReturnToObject):
+			// If we're at the object cell, we should have picked it up (next loop transition check)
+			// If we're adjacent to object, move to it instead of clearing obstacles
+			if (currentPhase == 2) {
+				// If robot is adjacent to object, don't clear - just move to object
+				int dx = env.getObjectCell().x - env.getRobotCell().x;
+				int dy = env.getObjectCell().y - env.getRobotCell().y;
+				bool adjacentToObject = (std::abs(dx) + std::abs(dy) == 1);
+				
+				if (!adjacentToObject && !env.isCarrying() && env.hasObstacleNeighbor()) {
+					option = 0; // ClearObstacle only if NOT adjacent
+				} else {
+					option = 2; // ReturnToObject - move toward object
+				}
+			}
+			// For phases 0 and 1, clear obstacles opportunistically
+			else if (!env.isCarrying() && env.hasObstacleNeighbor() && currentPhase != 3) {
+				option = 0; // ClearObstacle option
+			}
+			
+			// Store previous state for Q-learning
+			Environment2D prevState = env;
+			
 			options[option]->onSelect(env);
-			float reward = executor.executeOption(env, *options[option], 3); // Reduced from 5 to 3
-			planner.updateQ(env, option, reward, env, (int)options.size());
+			float reward = executor.executeOption(env, *options[option], 3);
+			planner.updateQ(prevState, option, reward, env, (int)options.size());
 			episodeReward += reward;
 			cumulativeReward += reward;
 			
 			// Debug: print reward info
 			if (episode < 3) { // Only print first 3 episodes
-				std::cout << "Episode " << episode << ", Option: " << options[option]->name() 
+				std::cout << "Episode " << episode << ", Phase: " << phaseNames[currentPhase] 
+				          << " (Option: " << phaseNames[option] << ")"
 				          << ", Reward: " << reward << ", Total: " << episodeReward 
 				          << ", Robot at (" << env.getRobotCell().x << "," << env.getRobotCell().y << ")" << std::endl;
+			}
+			
+			// Check again after execution if phase should transition
+			if (currentPhase == 0) {
+				if (!env.hasObstacleNeighbor()) {
+					currentPhase = 1;
+				}
+			} else if (currentPhase == 1) {
+				if (env.getRobotCell() == env.getTargetCell()) {
+					currentPhase = 2;
+					std::cout << "Episode " << episode << " - Reached target! Transitioning to ReturnToObject phase." << std::endl;
+				}
+			} else if (currentPhase == 2) {
+				if (env.isCarrying()) {
+					currentPhase = 3;
+					std::cout << "Episode " << episode << " - Picked up object! Transitioning to MoveObjectToTarget phase." << std::endl;
+				}
+			} else if (currentPhase == 3) {
+				// MoveObjectToTarget phase: check if task complete (at target with object)
+				if (env.isTaskComplete()) {
+					// Task complete!
+					done = true;
+					successfulEpisodes++;
+					reward += 50.0f; // Big reward for success
+					episodeReward += 50.0f;
+					std::cout << "Episode " << episode << " SUCCESS! Reward: " << episodeReward << std::endl;
+				}
 			}
 			
 			int currentDistance = std::abs(env.getRobotCell().x - env.getTargetCell().x) + 
@@ -115,12 +196,6 @@ int main(int argc, char** argv) {
 			}
 			
 			viz.renderWithOverlay(env, episode, episodeReward, (float)successfulEpisodes / (episode + 1));
-			
-			if (env.isTaskComplete()) {
-				done = true;
-				successfulEpisodes++;
-				std::cout << "Episode " << episode << " SUCCESS! Reward: " << episodeReward << std::endl;
-			}
 			
 			optionCount++;
 			viz.delay(50); // Reduced delay for faster decisions
