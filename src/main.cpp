@@ -115,19 +115,26 @@ int main(int argc, char** argv) {
 			int option = currentPhase;
 			
 			// Special handling for Phase 2 (ReturnToObject):
-			// Prefer the ReturnToObject option unless its policy reports no available move
-			// (i.e. it's blocked). Only then do we fall back to ClearObstacle.
+			// If we're at the object cell, we should have picked it up (next loop transition check)
+			// If we're adjacent to object, move to it instead of clearing obstacles
 			if (currentPhase == 2) {
-				// Query the ReturnToObject policy to see if it can move toward the object
+				// Use the option policies to decide: prefer ReturnToObject if it can make progress.
+				// Only run ClearObstacle when ReturnToObject cannot move AND ClearObstacle is
+				// ready to clear (i.e. its policy returns Action::None indicating an adjacent
+				// strategic obstacle).
 				auto returnPolicy = options[2]->policy();
-				Action intended = returnPolicy(env);
+				auto clearPolicy = options[0]->policy();
+				Action returnAction = returnPolicy(env);
+				Action clearAction = clearPolicy(env);
 
-				if (intended == Action::None && !env.isCarrying()) {
-					// The policy indicates the agent cannot progress toward the object
-					// (blocked). Allow clearing so the agent can create a path.
-					option = 0; // ClearObstacle
+				if (returnAction != Action::None) {
+					option = 2; // can make progress toward object
+				} else if (!env.isCarrying() && clearAction == Action::None) {
+					option = 0; // Clear adjacent strategic obstacle
 				} else {
-					option = 2; // ReturnToObject - move toward object
+					// fallback: try ReturnToObject (may cause the option's internal logic to
+					// approach an obstacle) so we avoid flip-flopping with ClearObstacle.
+					option = 2;
 				}
 			}
 			// For phases 0 and 1, clear obstacles opportunistically

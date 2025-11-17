@@ -187,6 +187,25 @@ bool Environment2D::shouldClearObstacle(const sf::Vector2i& obstaclePos) const {
 	return false;
 }
 
+bool Environment2D::shouldClearObstacleToward(const sf::Vector2i& obstaclePos, const sf::Vector2i& dest) const {
+	// Similar to shouldClearObstacle but compares direction to an explicit destination
+	float clearCost = 2.0f; // Base cost for clearing
+
+	sf::Vector2i toDest = dest - robotCell;
+	sf::Vector2i toObstacle = obstaclePos - robotCell;
+
+	if ((toDest.x > 0 && toObstacle.x > 0) || (toDest.x < 0 && toObstacle.x < 0)) {
+		if ((toDest.y > 0 && toObstacle.y > 0) || (toDest.y < 0 && toObstacle.y < 0)) {
+			float directDistance = computeHeuristicCost(robotCell, dest);
+			float aroundDistance = computeHeuristicCost(robotCell, obstaclePos) + computeHeuristicCost(obstaclePos, dest);
+			if (aroundDistance > directDistance + clearCost) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 float Environment2D::step(Action action) {
 	sf::Vector2i prev = robotCell;
 	// clear previous robot cell

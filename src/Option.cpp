@@ -5,6 +5,8 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <queue>
+#include <unordered_map>
 
 static Action smartPathfinding(const Environment2D& env, const sf::Vector2i& target) {
 	sf::Vector2i r = env.getRobotCell();
@@ -80,6 +82,65 @@ static Action smartPathfinding(const Environment2D& env, const sf::Vector2i& tar
 	return Action::None;
 }
 
+// BFS to find the next action along a shortest path to `target` avoiding obstacles.
+static Action bfsNextAction(const Environment2D& env, const sf::Vector2i& target) {
+	int w = env.getGridWidth();
+	int h = env.getGridHeight();
+	auto start = env.getRobotCell();
+	if (start == target) return Action::None;
+
+	auto idx = [&](int x, int y){ return y * w + x; };
+
+	std::vector<int> parent(w * h, -1);
+	std::queue<int> q;
+	int s = idx(start.x, start.y);
+	int g = idx(target.x, target.y);
+	q.push(s);
+	parent[s] = s;
+
+	static const int dx[4] = {1, -1, 0, 0};
+	static const int dy[4] = {0, 0, 1, -1};
+
+	bool found = false;
+	while (!q.empty()) {
+		int cur = q.front(); q.pop();
+		int cx = cur % w;
+		int cy = cur / w;
+		for (int k = 0; k < 4; ++k) {
+			int nx = cx + dx[k];
+			int ny = cy + dy[k];
+			if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+			int ni = idx(nx, ny);
+			if (parent[ni] != -1) continue;
+			if (env.isObstacle({nx, ny})) continue;
+			parent[ni] = cur;
+			if (ni == g) { found = true; break; }
+			q.push(ni);
+		}
+		if (found) break;
+	}
+
+	if (!found) return Action::None;
+
+	// Reconstruct path: from goal back to start, take the first step after start
+	int cur = g;
+	int prev = parent[cur];
+	while (prev != s) {
+		cur = prev;
+		prev = parent[cur];
+	}
+	int nextX = cur % w;
+	int nextY = cur / w;
+
+	int rx = start.x;
+	int ry = start.y;
+	if (nextX == rx + 1 && nextY == ry) return Action::Right;
+	if (nextX == rx - 1 && nextY == ry) return Action::Left;
+	if (nextX == rx && nextY == ry + 1) return Action::Down;
+	if (nextX == rx && nextY == ry - 1) return Action::Up;
+	return Action::None;
+}
+
 MoveToTargetOption::MoveToTargetOption() : optionName("MoveToTarget") {}
 
 void MoveToTargetOption::onSelect(Environment2D& env) {
@@ -147,7 +208,13 @@ std::function<Action(const Environment2D&)> ClearObstacleOption::policy() const 
 			int ny = e.getRobotCell().y + dy[k];
 			if (nx >= 0 && nx < e.getGridWidth() && ny >= 0 && ny < e.getGridHeight()) {
 				sf::Vector2i obstaclePos(nx, ny);
-				if (e.isObstacle(obstaclePos) && e.shouldClearObstacle(obstaclePos)) {
+					// Consider obstacle strategic if it's useful to clear for the global
+					// target OR (when not carrying) for the object (so ReturnToObject can
+					// make progress). This prevents ClearObstacle from opportunistically
+					// clearing obstacles that don't help reach the object.
+					if (e.isObstacle(obstaclePos) && (
+						 e.shouldClearObstacle(obstaclePos) ||
+						 (!e.isCarrying() && e.shouldClearObstacleToward(obstaclePos, e.getObjectCell())))) {
 					bestObstacle = obstaclePos;
 					foundStrategicObstacle = true;
 					break;
@@ -195,64 +262,59 @@ void MoveObjectToTargetOption::onSelect(Environment2D& env) {
 		objectPickupLocation = env.getObjectCell();
 	}
 }
-
-bool MoveObjectToTargetOption::isComplete(const Environment2D& env) const {
-	// Complete when we're at target AND carrying the object
-	return env.isTaskComplete();
-}
-
-std::function<bool(const Environment2D&)> MoveObjectToTargetOption::goal() const {
-	return [](const Environment2D& e) { 
-		return e.isTaskComplete();
-	};
-}
-
-std::function<Action(const Environment2D&)> MoveObjectToTargetOption::policy() const {
 	return [this](const Environment2D& e) {
-		// If carrying, move toward target
-		if (e.isCarrying()) {
-			return smartPathfinding(e, e.getTargetCell());
-		}
-		
-		// If not carrying but we know where the object is, go back for it
-		if (objectPickupLocation.x != -1 && objectPickupLocation.y != -1) {
-			return smartPathfinding(e, objectPickupLocation);
-		}
-		
-		// Fallback: move toward target anyway
-		return smartPathfinding(e, e.getTargetCell());
-	};
-}
-
-ReturnToObjectOption::ReturnToObjectOption() : optionName("ReturnToObject") {}
-
-void ReturnToObjectOption::onSelect(Environment2D& env) {
-	(void)env;
-}
-
-bool ReturnToObjectOption::isComplete(const Environment2D& env) const {
-	// Complete when carrying the object
-	return env.isCarrying();
-}
-
-std::function<bool(const Environment2D&)> ReturnToObjectOption::goal() const {
-	return [](const Environment2D& e) { 
-		return e.isCarrying();
-	};
-}
-
-std::function<Action(const Environment2D&)> ReturnToObjectOption::policy() const {
-	return [](const Environment2D& e) {
-		// Try to move directly toward the object
-		Action a = smartPathfinding(e, e.getObjectCell());
+		// Use a deterministic shortest-path step first to avoid local oscillation.
+		Action a = bfsNextAction(e, e.getObjectCell());
 		if (a != Action::None) return a;
 
-		// If we're fully blocked (no immediate unblocked neighbor), actively seek
-		// a nearby obstacle that lies roughly toward the object and approach a
-		// free cell adjacent to it so the ClearObstacle option can clear it.
-
+		// If BFS fails (no unobstructed path), fall back to seeking a nearby obstacle
+		// and approaching a free adjacent cell so that ClearObstacle can act.
 		const int maxSearchRadius = 8;
 		sf::Vector2i robot = e.getRobotCell();
+		sf::Vector2i object = e.getObjectCell();
+
+		bool found = false;
+		sf::Vector2i bestObs(0,0);
+		float bestScore = std::numeric_limits<float>::infinity();
+
+		for (int dx = -maxSearchRadius; dx <= maxSearchRadius; ++dx) {
+			for (int dy = -maxSearchRadius; dy <= maxSearchRadius; ++dy) {
+				sf::Vector2i pos(robot.x + dx, robot.y + dy);
+				if (pos.x < 0 || pos.x >= e.getGridWidth() || pos.y < 0 || pos.y >= e.getGridHeight()) continue;
+				if (!e.isObstacle(pos)) continue;
+
+				float dr = std::hypot((float)(pos.x - robot.x), (float)(pos.y - robot.y));
+				float do_ = std::hypot((float)(pos.x - object.x), (float)(pos.y - object.y));
+				float score = dr + 0.5f * do_;
+
+				if (score < bestScore) {
+					bestScore = score;
+					bestObs = pos;
+					found = true;
+				}
+			}
+		}
+
+		if (!found) {
+			// No nearby obstacles found; fallback to staying still
+			return Action::None;
+		}
+
+		// Find a free neighbor cell adjacent to the chosen obstacle to approach
+		static const int ndx[4] = {1, -1, 0, 0};
+		static const int ndy[4] = {0, 0, 1, -1};
+		for (int k = 0; k < 4; ++k) {
+			sf::Vector2i adj(bestObs.x + ndx[k], bestObs.y + ndy[k]);
+			if (adj.x < 0 || adj.x >= e.getGridWidth() || adj.y < 0 || adj.y >= e.getGridHeight()) continue;
+			if (e.isObstacle(adj)) continue; // must be free to stand on
+
+			// Return an action toward that adjacent free cell
+			return bfsNextAction(e, adj);
+		}
+
+		// If no adjacent free cell found (obstacle enclosed), stay still
+		return Action::None;
+	};
 		sf::Vector2i object = e.getObjectCell();
 
 		// Find the best obstacle: prefer obstacles that are closer to the object

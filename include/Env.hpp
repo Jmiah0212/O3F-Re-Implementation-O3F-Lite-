@@ -61,6 +61,8 @@ public:
 	// A* heuristic methods
 	float computeHeuristicCost(const sf::Vector2i& from, const sf::Vector2i& to) const;
 	bool shouldClearObstacle(const sf::Vector2i& obstaclePos) const;
+	// Check if clearing the obstacle at obstaclePos is beneficial when heading toward `dest`
+	bool shouldClearObstacleToward(const sf::Vector2i& obstaclePos, const sf::Vector2i& dest) const;
 	
 	// Task completion check: require carrying the object and being at the target
 	bool isTaskComplete() const { return carrying && robotCell == targetCell; }
