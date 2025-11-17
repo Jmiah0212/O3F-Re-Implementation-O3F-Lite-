@@ -156,7 +156,11 @@ int main(int argc, char** argv) {
 				std::cout << "Episode " << episode << ", Phase: " << phaseNames[currentPhase] 
 				          << " (Option: " << phaseNames[option] << ")"
 				          << ", Reward: " << reward << ", Total: " << episodeReward 
-				          << ", Robot at (" << env.getRobotCell().x << "," << env.getRobotCell().y << ")" << std::endl;
+				          << ", Robot at (" << env.getRobotCell().x << "," << env.getRobotCell().y << ")";
+				if (currentPhase == 3) {
+					std::cout << " [Following stored path]";
+				}
+				std::cout << std::endl;
 			}
 			
 			// Check again after execution if phase should transition
@@ -173,6 +177,16 @@ int main(int argc, char** argv) {
 				if (env.isCarrying()) {
 					currentPhase = 3;
 					std::cout << "Episode " << episode << " - Picked up object! Transitioning to MoveObjectToTarget phase." << std::endl;
+					
+					// Pass the path taken to reach the object to MoveObjectToTargetOption
+					MoveToObjectOption* moveToObjOpt = dynamic_cast<MoveToObjectOption*>(options[2].get());
+					MoveObjectToTargetOption* moveObjToTargetOpt = dynamic_cast<MoveObjectToTargetOption*>(options[3].get());
+					if (moveToObjOpt && moveObjToTargetOpt) {
+						auto path = moveToObjOpt->getPathToObject();
+						std::cout << "  Path size: " << path.size() << " waypoints" << std::endl;
+						moveObjToTargetOpt->setReturnPath(path);
+						std::cout << "  Path set for return journey" << std::endl;
+					}
 				}
 			} else if (currentPhase == 3) {
 				// MoveObjectToTarget phase: check if task complete (at target with object)
@@ -189,18 +203,25 @@ int main(int argc, char** argv) {
 			int currentDistance = std::abs(env.getRobotCell().x - env.getTargetCell().x) + 
 			                     std::abs(env.getRobotCell().y - env.getTargetCell().y);
 			
-			if (currentDistance >= lastDistance) {
-				stepsWithoutProgress++;
+			// In phase 3 (MoveObjectToTarget with stored path), allow backward steps
+			// Only track progress in other phases
+			if (currentPhase != 3) {
+				if (currentDistance >= lastDistance) {
+					stepsWithoutProgress++;
+				} else {
+					stepsWithoutProgress = 0;
+				}
+				lastDistance = currentDistance;
+				
+				// Terminate if stuck for too long (only in phases 0-2)
+				if (stepsWithoutProgress > 15) {
+					episodeReward -= 20.0f; // Penalty for getting stuck
+					std::cout << "Episode " << episode << " terminated early - stuck without progress" << std::endl;
+					break;
+				}
 			} else {
-				stepsWithoutProgress = 0;
-			}
-			lastDistance = currentDistance;
-			
-			// Terminate if stuck for too long
-			if (stepsWithoutProgress > 15) {
-				episodeReward -= 20.0f; // Penalty for getting stuck
-				std::cout << "Episode " << episode << " terminated early - stuck without progress" << std::endl;
-				break;
+				// In phase 3, just track current distance without penalizing backward steps
+				lastDistance = currentDistance;
 			}
 			
 			viz.renderWithOverlay(env, episode, episodeReward, (float)successfulEpisodes / (episode + 1));

@@ -64,8 +64,13 @@ public:
 	bool isComplete(const Environment2D& env) const override;
 	std::function<bool(const Environment2D&)> goal() const override;
 	std::function<Action(const Environment2D&)> policy() const override;
+	
+	// Path storage for returning to target
+	const std::vector<sf::Vector2i>& getPathToObject() const { return pathToObject; }
+	void setPathToObject(const std::vector<sf::Vector2i>& path) { pathToObject = path; }
 private:
 	std::string optionName;
+	std::vector<sf::Vector2i> pathToObject;
 };
 
 class MoveObjectToTargetOption : public Option {
@@ -76,9 +81,17 @@ public:
 	bool isComplete(const Environment2D& env) const override;
 	std::function<bool(const Environment2D&)> goal() const override;
 	std::function<Action(const Environment2D&)> policy() const override;
+	
+	// Use the path from MoveToObjectOption to return
+	void setReturnPath(const std::vector<sf::Vector2i>& path) { 
+		returnPath = path; 
+		returnPathIndex = 0;  // Reset index when path is set
+	}
 private:
 	std::string optionName;
 	sf::Vector2i objectPickupLocation;
+	std::vector<sf::Vector2i> returnPath;
+	mutable size_t returnPathIndex = 0;  // mutable to allow modification in const policy()
 };
 
 class ReturnToObjectOption : public Option {
