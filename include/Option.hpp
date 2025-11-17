@@ -32,9 +32,9 @@ private:
 	std::string optionName;
 };
 
-class ClearObstacleOption : public Option {
+class GraspTargetOption : public Option {
 public:
-	ClearObstacleOption();
+	GraspTargetOption();
 	const std::string& name() const override { return optionName; }
 	void onSelect(Environment2D& env) override;
 	bool isComplete(const Environment2D& env) const override;
@@ -44,9 +44,46 @@ private:
 	std::string optionName;
 };
 
-class GraspTargetOption : public Option {
+class ClearObstacleOption : public Option {
 public:
-	GraspTargetOption();
+    ClearObstacleOption();
+    const std::string& name() const override { return optionName; }
+    void onSelect(Environment2D& env) override;
+    bool isComplete(const Environment2D& env) const override;
+    std::function<bool(const Environment2D&)> goal() const override;
+    std::function<Action(const Environment2D&)> policy() const override;
+private:
+    std::string optionName;
+};
+
+class MoveToObjectOption : public Option {
+public:
+	MoveToObjectOption();
+	const std::string& name() const override { return optionName; }
+	void onSelect(Environment2D& env) override;
+	bool isComplete(const Environment2D& env) const override;
+	std::function<bool(const Environment2D&)> goal() const override;
+	std::function<Action(const Environment2D&)> policy() const override;
+private:
+	std::string optionName;
+};
+
+class MoveObjectToTargetOption : public Option {
+public:
+	MoveObjectToTargetOption();
+	const std::string& name() const override { return optionName; }
+	void onSelect(Environment2D& env) override;
+	bool isComplete(const Environment2D& env) const override;
+	std::function<bool(const Environment2D&)> goal() const override;
+	std::function<Action(const Environment2D&)> policy() const override;
+private:
+	std::string optionName;
+	sf::Vector2i objectPickupLocation;
+};
+
+class ReturnToObjectOption : public Option {
+public:
+	ReturnToObjectOption();
 	const std::string& name() const override { return optionName; }
 	void onSelect(Environment2D& env) override;
 	bool isComplete(const Environment2D& env) const override;

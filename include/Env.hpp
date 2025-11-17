@@ -53,13 +53,17 @@ public:
 	bool hasObstacleNeighbor() const;
 	bool clearAnyAdjacentObstacle();
 	bool isObstacle(const sf::Vector2i& cell) const;
+
+	// Object / carrying helpers
+	sf::Vector2i getObjectCell() const { return objectCell; }
+	bool isCarrying() const { return carrying; }
 	
 	// A* heuristic methods
 	float computeHeuristicCost(const sf::Vector2i& from, const sf::Vector2i& to) const;
 	bool shouldClearObstacle(const sf::Vector2i& obstaclePos) const;
 	
-	// Task completion check
-	bool isTaskComplete() const { return robotCell == targetCell; }
+	// Task completion check: require carrying the object and being at the target
+	bool isTaskComplete() const { return carrying && robotCell == targetCell; }
 
 	// Rendering
 	void render(sf::RenderWindow& window);
@@ -79,6 +83,8 @@ private:
 	std::vector<CellType> grid;
 	sf::Vector2i robotCell;
 	sf::Vector2i targetCell;
+	sf::Vector2i objectCell;
+	bool carrying = false;
 
 	void resolveBoundaries(sf::Vector2f& pos, float radius);
 	float computeReward(const sf::Vector2i& prevRobotCell) const;
