@@ -10,11 +10,11 @@ This project implements a **hierarchical reinforcement learning framework** wher
 ## Key Features
 
 ### Agent Capabilities
-- ✅ **Intelligent Path Planning**: Uses BFS to find shortest paths while avoiding obstacles
-- ✅ **Obstacle Clearing**: Strategically clears blocking obstacles to reach goals
-- ✅ **Object Retrieval**: Navigates to objects and picks them up
-- ✅ **Smart Return Navigation**: Remembers and follows the exact path taken to reach an object, then retraces it back to the target
-- ✅ **Learning**: Tabular Q-learning over a discrete state space (position, distance, direction, carrying state)
+- **Intelligent Path Planning**: Uses BFS to find shortest paths while avoiding obstacles
+- **Obstacle Clearing**: Strategically clears blocking obstacles to reach goals
+- **Object Retrieval**: Navigates to objects and picks them up
+- **Smart Return Navigation**: Remembers and follows the exact path taken to reach an object, then retraces it back to the target
+- **Learning**: Tabular Q-learning over a discrete state space (position, distance, direction, carrying state)
 
 ### Options (High-Level Actions)
 1. **ClearObstacle** - Clear blocking obstacles in the way
