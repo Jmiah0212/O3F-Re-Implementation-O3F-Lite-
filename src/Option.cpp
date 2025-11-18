@@ -8,6 +8,118 @@
 #include <queue>
 #include <unordered_map>
 
+// Helper function to check if a cell is on the boundary (edge of environment)
+static bool isBoundaryCell(const sf::Vector2i& cell, int gridW, int gridH) {
+	return (cell.x <= 0 || cell.x >= gridW - 1 || cell.y <= 0 || cell.y >= gridH - 1);
+}
+
+// Helper function to track move history and detect stuck loops
+static void updateMoveHistory(std::vector<Action>& history, int& consecutiveCount, Action newAction) {
+	// Keep only last 5 moves for memory efficiency
+	if (history.size() > 5) {
+		history.erase(history.begin());
+	}
+	
+	// Check if this action is the same as the last action
+	if (!history.empty() && history.back() == newAction) {
+		consecutiveCount++;
+	} else {
+		consecutiveCount = 1;
+	}
+	
+	history.push_back(newAction);
+}
+
+// Helper function to check if agent is stuck in a loop (same move 3+ times)
+static bool isStuckInLoop(int consecutiveCount) {
+	return consecutiveCount >= 3;
+}
+
+// Helper function to find if path is blocked and return direction to nearest blocking obstacle
+// Returns the next action toward the nearest blocking obstacle if path is blocked
+// Returns Action::None if path is clear
+static Action findNextActionTowardBlockingObstacle(const Environment2D& env, const sf::Vector2i& target) {
+	int w = env.getGridWidth();
+	int h = env.getGridHeight();
+	auto start = env.getRobotCell();
+	
+	if (start == target) return Action::None;
+	
+	auto idx = [&](int x, int y){ return y * w + x; };
+	
+	// First, check if we can reach target via BFS (ignoring obstacles)
+	std::vector<int> parent(w * h, -1);
+	std::queue<int> q;
+	int s = idx(start.x, start.y);
+	int g = idx(target.x, target.y);
+	q.push(s);
+	parent[s] = s;
+	
+	static const int dx[4] = {1, -1, 0, 0};
+	static const int dy[4] = {0, 0, 1, -1};
+	
+	bool foundTarget = false;
+	std::vector<int> distToTarget(w * h, -1);
+	distToTarget[s] = std::abs(start.x - target.x) + std::abs(start.y - target.y);
+	
+	// BFS ignoring obstacles to find theoretical shortest path
+	while (!q.empty()) {
+		int cur = q.front(); q.pop();
+		int cx = cur % w;
+		int cy = cur / w;
+		
+		if (cur == g) {
+			foundTarget = true;
+			break;
+		}
+		
+		for (int k = 0; k < 4; ++k) {
+			int nx = cx + dx[k];
+			int ny = cy + dy[k];
+			if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+			if (isBoundaryCell({nx, ny}, w, h)) continue;
+			
+			int ni = idx(nx, ny);
+			if (parent[ni] != -1) continue;  // Already visited
+			
+			parent[ni] = cur;
+			distToTarget[ni] = std::abs(nx - target.x) + std::abs(ny - target.y);
+			q.push(ni);
+		}
+	}
+	
+	if (!foundTarget) return Action::None;  // No theoretical path even ignoring obstacles
+	
+	// Now find obstacles on the theoretical shortest path
+	// Walk from start toward target, find first obstacle blocking direct progress
+	std::vector<sf::Vector2i> theoreticalPath;
+	int cur = g;
+	while (cur != s) {
+		int x = cur % w;
+		int y = cur / w;
+		theoreticalPath.push_back({x, y});
+		cur = parent[cur];
+	}
+	std::reverse(theoreticalPath.begin(), theoreticalPath.end());
+	
+	// Find the first obstacle on this path or adjacent to it
+	for (const auto& pathCell : theoreticalPath) {
+		if (env.isObstacle(pathCell)) {
+			// Found blocking obstacle on the path
+			// Move toward it
+			int dx_to_obs = pathCell.x - start.x;
+			int dy_to_obs = pathCell.y - start.y;
+			
+			if (dx_to_obs > 0) return Action::Right;
+			if (dx_to_obs < 0) return Action::Left;
+			if (dy_to_obs > 0) return Action::Down;
+			if (dy_to_obs < 0) return Action::Up;
+		}
+	}
+	
+	return Action::None;  // No blocking obstacles found
+}
+
 static Action smartPathfinding(const Environment2D& env, const sf::Vector2i& target) {
 	sf::Vector2i r = env.getRobotCell();
 	
@@ -59,7 +171,8 @@ static Action smartPathfinding(const Environment2D& env, const sf::Vector2i& tar
 	for (auto& opt : options) {
 		bool outOfBounds = (opt.pos.x < 0 || opt.pos.x >= env.getGridWidth() || 
 		                   opt.pos.y < 0 || opt.pos.y >= env.getGridHeight());
-		opt.blocked = outOfBounds || env.isObstacle(opt.pos);
+		bool onBoundary = isBoundaryCell(opt.pos, env.getGridWidth(), env.getGridHeight());
+		opt.blocked = outOfBounds || onBoundary || env.isObstacle(opt.pos);
 		
 		if (opt.blocked) {
 			opt.priority = 999.0f; // Very low priority
@@ -82,7 +195,7 @@ static Action smartPathfinding(const Environment2D& env, const sf::Vector2i& tar
 	return Action::None;
 }
 
-// BFS to find the full path from start to target, avoiding obstacles
+// BFS to find the full path from start to target, avoiding obstacles and boundary cells
 static std::vector<sf::Vector2i> bfsFullPath(const Environment2D& env, const sf::Vector2i& target) {
 	std::vector<sf::Vector2i> emptyPath;
 	int w = env.getGridWidth();
@@ -111,6 +224,8 @@ static std::vector<sf::Vector2i> bfsFullPath(const Environment2D& env, const sf:
 			int nx = cx + dx[k];
 			int ny = cy + dy[k];
 			if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+			// Avoid boundary cells
+			if (isBoundaryCell({nx, ny}, w, h)) continue;
 			int ni = idx(nx, ny);
 			if (parent[ni] != -1) continue;
 			if (env.isObstacle({nx, ny})) continue;
@@ -164,6 +279,8 @@ static Action bfsNextAction(const Environment2D& env, const sf::Vector2i& target
 			int nx = cx + dx[k];
 			int ny = cy + dy[k];
 			if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+			// Avoid boundary cells
+			if (isBoundaryCell({nx, ny}, w, h)) continue;
 			int ni = idx(nx, ny);
 			if (parent[ni] != -1) continue;
 			if (env.isObstacle({nx, ny})) continue;
@@ -199,6 +316,9 @@ MoveToTargetOption::MoveToTargetOption() : optionName("MoveToTarget") {}
 
 void MoveToTargetOption::onSelect(Environment2D& env) {
 	(void)env;
+	// Reset move history when option is selected
+	moveHistory.clear();
+	consecutiveRepeatedMoves = 0;
 }
 
 bool MoveToTargetOption::isComplete(const Environment2D& env) const {
@@ -213,9 +333,21 @@ std::function<bool(const Environment2D&)> MoveToTargetOption::goal() const {
 }
 
 std::function<Action(const Environment2D&)> MoveToTargetOption::policy() const {
-	return [](const Environment2D& e) { 
-		// Move toward target, ignore obstacles and objects
-		return smartPathfinding(e, e.getTargetCell()); 
+	return [this](const Environment2D& e) { 
+		Action action;
+		
+		// If stuck in loop, use BFS instead of smart pathfinding
+		if (isStuckInLoop(consecutiveRepeatedMoves)) {
+			action = bfsNextAction(e, e.getTargetCell());
+		} else {
+			// Normal smart pathfinding
+			action = smartPathfinding(e, e.getTargetCell());
+		}
+		
+		// Track move history to detect loops
+		updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
+		
+		return action;
 	};
 }
 
@@ -291,6 +423,9 @@ MoveToObjectOption::MoveToObjectOption() : optionName("MoveToObject") {}
 void MoveToObjectOption::onSelect(Environment2D& env) {
 	// Store the path to the object when this option is selected
 	pathToObject = bfsFullPath(env, env.getObjectCell());
+	// Reset move history
+	moveHistory.clear();
+	consecutiveRepeatedMoves = 0;
 }
 
 bool MoveToObjectOption::isComplete(const Environment2D& env) const {
@@ -304,11 +439,21 @@ std::function<bool(const Environment2D&)> MoveToObjectOption::goal() const {
 }
 
 std::function<Action(const Environment2D&)> MoveToObjectOption::policy() const {
-	return [](const Environment2D& e) { 
-		return smartPathfinding(e, e.getObjectCell()); 
+	return [this](const Environment2D& e) { 
+		// Always use BFS for moving to object to ensure shortest path
+		Action action = bfsNextAction(e, e.getObjectCell());
+		
+		// If BFS returns None (path blocked by obstacles), move toward the blocking obstacle
+		if (action == Action::None && e.getRobotCell() != e.getObjectCell()) {
+			action = findNextActionTowardBlockingObstacle(e, e.getObjectCell());
+		}
+		
+		// Track move history
+		updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
+		
+		return action;
 	};
 }
-
 MoveObjectToTargetOption::MoveObjectToTargetOption() : optionName("MoveObjectToTarget"), objectPickupLocation(-1, -1), returnPathIndex(0) {}
 
 void MoveObjectToTargetOption::onSelect(Environment2D& env) {
@@ -318,6 +463,9 @@ void MoveObjectToTargetOption::onSelect(Environment2D& env) {
 	}
 	// Don't reset returnPathIndex here - it should only be reset in setReturnPath()
 	// so that the path index persists across multiple onSelect calls
+	// Reset move history for loop detection
+	moveHistory.clear();
+	consecutiveRepeatedMoves = 0;
 }
 
 bool MoveObjectToTargetOption::isComplete(const Environment2D& env) const {
@@ -333,6 +481,8 @@ std::function<bool(const Environment2D&)> MoveObjectToTargetOption::goal() const
 
 std::function<Action(const Environment2D&)> MoveObjectToTargetOption::policy() const {
 	return [this](const Environment2D& e) {
+		Action action = Action::None;
+		
 		// If we have a return path stored, follow it in reverse
 		if (!returnPath.empty() && returnPathIndex < returnPath.size()) {
 			sf::Vector2i currentPos = e.getRobotCell();
@@ -356,16 +506,40 @@ std::function<Action(const Environment2D&)> MoveObjectToTargetOption::policy() c
 			}
 			
 			// Move toward waypoint
-			if (dx > 0) return Action::Right;
-			if (dx < 0) return Action::Left;
-			if (dy > 0) return Action::Down;
-			if (dy < 0) return Action::Up;
+			if (dx > 0) action = Action::Right;
+			else if (dx < 0) action = Action::Left;
+			else if (dy > 0) action = Action::Down;
+			else if (dy < 0) action = Action::Up;
+			else action = Action::None;
 			
-			return Action::None;
+			// Track move for loop detection
+			updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
+			
+			// If stuck in loop while following path, abandon path and use pathfinding
+			if (isStuckInLoop(consecutiveRepeatedMoves)) {
+				consecutiveRepeatedMoves = 0;
+				moveHistory.clear();
+				action = bfsNextAction(e, e.getTargetCell());
+				updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
+			}
+			
+			return action;
 		}
 		
 		// Fallback: use smart pathfinding toward target
-		return smartPathfinding(e, e.getTargetCell());
+		action = smartPathfinding(e, e.getTargetCell());
+		
+		// Track move for loop detection
+		updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
+		
+		// If stuck in loop, try BFS instead
+		if (isStuckInLoop(consecutiveRepeatedMoves)) {
+			action = bfsNextAction(e, e.getTargetCell());
+			consecutiveRepeatedMoves = 0;  // Reset counter when switching strategy
+			updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
+		}
+		
+		return action;
 	};
 }
 
@@ -374,6 +548,9 @@ ReturnToObjectOption::ReturnToObjectOption() : optionName("ReturnToObject") {}
 
 void ReturnToObjectOption::onSelect(Environment2D& env) {
 	(void)env;
+	// Reset move history when option is selected
+	moveHistory.clear();
+	consecutiveRepeatedMoves = 0;
 }
 
 bool ReturnToObjectOption::isComplete(const Environment2D& env) const {
@@ -388,10 +565,21 @@ std::function<bool(const Environment2D&)> ReturnToObjectOption::goal() const {
 }
 
 std::function<Action(const Environment2D&)> ReturnToObjectOption::policy() const {
-	return [](const Environment2D& e) {
+	return [this](const Environment2D& e) {
+		Action a;
+		
 		// Try deterministic BFS toward the object first
-		Action a = bfsNextAction(e, e.getObjectCell());
-		if (a != Action::None) return a;
+		a = bfsNextAction(e, e.getObjectCell());
+		if (a != Action::None) {
+			// Track the move
+			updateMoveHistory(moveHistory, consecutiveRepeatedMoves, a);
+			return a;
+		}
+
+		// If stuck in loop trying BFS, reset strategy counter and try obstacle approach
+		if (isStuckInLoop(consecutiveRepeatedMoves)) {
+			consecutiveRepeatedMoves = 0;
+		}
 
 		// If blocked, attempt to approach a strategic obstacle so ClearObstacle can act
 		const int maxSearchRadius = 8;
@@ -428,7 +616,10 @@ std::function<Action(const Environment2D&)> ReturnToObjectOption::policy() const
 			sf::Vector2i adj(bestObs.x + ndx[k], bestObs.y + ndy[k]);
 			if (adj.x < 0 || adj.x >= e.getGridWidth() || adj.y < 0 || adj.y >= e.getGridHeight()) continue;
 			if (e.isObstacle(adj)) continue;
-			return bfsNextAction(e, adj);
+			a = bfsNextAction(e, adj);
+			// Track the move
+			updateMoveHistory(moveHistory, consecutiveRepeatedMoves, a);
+			return a;
 		}
 
 		return Action::None;
