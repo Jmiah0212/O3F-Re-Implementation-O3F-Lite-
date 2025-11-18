@@ -81,6 +81,8 @@ int main(int argc, char** argv) {
 		int lastDistance = std::abs(env.getRobotCell().x - env.getTargetCell().x) + 
 		                   std::abs(env.getRobotCell().y - env.getTargetCell().y);
 		
+		bool phaseJustChanged = false;  // Track if phase just changed this iteration
+		
 		while (!done && viz.isOpen() && optionCount < MAX_OPTIONS_PER_EPISODE) {
 			bool shouldClose = false, resetRequested = false;
 			viz.pollEvents(shouldClose, resetRequested);
@@ -88,25 +90,30 @@ int main(int argc, char** argv) {
 			if (resetRequested) {
 				env.reset(5);
 				currentPhase = 0;
+				phaseJustChanged = false;
 			}
 
 			// Check phase transition conditions FIRST, before executing any option
 			// This ensures we immediately transition when conditions are met
+			phaseJustChanged = false;
 			if (currentPhase == 0) {
 				// ClearObstacles phase: transition when no obstacles nearby
 				if (!env.hasObstacleNeighbor()) {
 					currentPhase = 1;
+					phaseJustChanged = true;
 				}
 			} else if (currentPhase == 1) {
 				// MoveToTarget phase: transition when at target
 				if (env.getRobotCell() == env.getTargetCell()) {
 					currentPhase = 2;
+					phaseJustChanged = true;
 					std::cout << "Episode " << episode << " - Reached target! Transitioning to ReturnToObject phase." << std::endl;
 				}
 			} else if (currentPhase == 2) {
 				// ReturnToObject phase: transition when carrying object
 				if (env.isCarrying()) {
 					currentPhase = 3;
+					phaseJustChanged = true;
 					std::cout << "Episode " << episode << " - Picked up object! Transitioning to MoveObjectToTarget phase." << std::endl;
 				}
 			}
@@ -114,31 +121,43 @@ int main(int argc, char** argv) {
 			// Determine which option to execute based on current phase
 			int option = currentPhase;
 			
-			// Special handling for Phase 2 (ReturnToObject):
-			// If we're at the object cell, we should have picked it up (next loop transition check)
-			// If we're adjacent to object, move to it instead of clearing obstacles
-			if (currentPhase == 2) {
-				// Use the option policies to decide: prefer ReturnToObject if it can make progress.
-				// Only run ClearObstacle when ReturnToObject cannot move AND ClearObstacle is
-				// ready to clear (i.e. its policy returns Action::None indicating an adjacent
-				// strategic obstacle).
-				auto returnPolicy = options[2]->policy();
-				auto clearPolicy = options[0]->policy();
-				Action returnAction = returnPolicy(env);
-				Action clearAction = clearPolicy(env);
-
-				if (returnAction != Action::None) {
-					option = 2; // can make progress toward object
-				} else if (!env.isCarrying() && clearAction == Action::None) {
-					option = 0; // Clear adjacent strategic obstacle
+			// Phase 3 (MoveObjectToTarget): DO NOT clear obstacles - robot must navigate around them
+			// with stored path or A* pathfinding
+			if (currentPhase == 3) {
+				// Never clear obstacles in phase 3 - just execute MoveObjectToTarget
+				option = 3;
+			}
+			// Special handling for Phase 2 (ReturnToObject → MoveToObject):
+			// In phase 2, the robot must find the absolute shortest path and can clear any obstacles
+			// that are on that shortest path. Always prefer to clear when blocked.
+			else if (currentPhase == 2) {
+				// Skip clearing on the first step after transitioning to phase 2
+				if (phaseJustChanged) {
+					option = 2;  // Just do ReturnToObject without clearing
+				} else if (!env.isCarrying() && env.hasObstacleNeighbor()) {
+					// In Phase 2, always try to clear obstacles when blocked
+					// The robot will clear any obstacle adjacent to it
+					option = 0;  // ClearObstacle option
 				} else {
-					// fallback: try ReturnToObject (may cause the option's internal logic to
-					// approach an obstacle) so we avoid flip-flopping with ClearObstacle.
+					// No obstacles or already carrying - proceed with ReturnToObject
 					option = 2;
 				}
 			}
-			// For phases 0 and 1, clear obstacles opportunistically
-			else if (!env.isCarrying() && env.hasObstacleNeighbor() && currentPhase != 3) {
+			// Phase 1 (MoveToTarget): Don't clear obstacles once at target
+			else if (currentPhase == 1) {
+				// If already at target, don't trigger obstacle clearing
+				if (env.getRobotCell() == env.getTargetCell()) {
+					option = 1;  // Stay with MoveToTarget to finish the step cleanly
+				} else if (!env.isCarrying() && env.hasObstacleNeighbor()) {
+					// If not at target and obstacles nearby, clear them
+					option = 0;  // ClearObstacle option
+				} else {
+					// No obstacles - proceed with MoveToTarget
+					option = 1;
+				}
+			}
+			// For phase 0, clear obstacles opportunistically when not carrying
+			else if (currentPhase == 0 && !env.isCarrying() && env.hasObstacleNeighbor()) {
 				option = 0; // ClearObstacle option
 			}
 			
@@ -146,7 +165,7 @@ int main(int argc, char** argv) {
 			Environment2D prevState = env;
 			
 			options[option]->onSelect(env);
-			float reward = executor.executeOption(env, *options[option], 3);
+			float reward = executor.executeOption(env, *options[option], 3, currentPhase);
 			planner.updateQ(prevState, option, reward, env, (int)options.size());
 			episodeReward += reward;
 			cumulativeReward += reward;

@@ -17,4 +17,7 @@ public:
 		const std::function<Action(const Environment2D&)>& policy);
 
 	float executeOption(Environment2D& env, const Option& option, int maxSteps);
+	
+	// Version that accepts phase information for phase-specific reward handling
+	float executeOption(Environment2D& env, const Option& option, int maxSteps, int currentPhase);
 };

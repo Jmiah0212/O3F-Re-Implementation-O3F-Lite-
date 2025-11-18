@@ -30,6 +30,8 @@ public:
 	std::function<Action(const Environment2D&)> policy() const override;
 private:
 	std::string optionName;
+	mutable std::vector<Action> moveHistory;  // Track last moves to detect loops
+	mutable int consecutiveRepeatedMoves = 0; // Count of repeated moves
 };
 
 class GraspTargetOption : public Option {
@@ -71,6 +73,8 @@ public:
 private:
 	std::string optionName;
 	std::vector<sf::Vector2i> pathToObject;
+	mutable std::vector<Action> moveHistory;  // Track last moves
+	mutable int consecutiveRepeatedMoves = 0;
 };
 
 class MoveObjectToTargetOption : public Option {
@@ -92,6 +96,8 @@ private:
 	sf::Vector2i objectPickupLocation;
 	std::vector<sf::Vector2i> returnPath;
 	mutable size_t returnPathIndex = 0;  // mutable to allow modification in const policy()
+	mutable std::vector<Action> moveHistory;  // Track last moves
+	mutable int consecutiveRepeatedMoves = 0;
 };
 
 class ReturnToObjectOption : public Option {
@@ -104,6 +110,8 @@ public:
 	std::function<Action(const Environment2D&)> policy() const override;
 private:
 	std::string optionName;
+	mutable std::vector<Action> moveHistory;  // Track last moves
+	mutable int consecutiveRepeatedMoves = 0;
 };
 
 std::vector<std::unique_ptr<Option>> makeDefaultOptions();
