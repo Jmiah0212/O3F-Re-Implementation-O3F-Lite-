@@ -44,6 +44,11 @@ float OptionExecutor::runPrimitiveUntil(Environment2D& env, int maxSteps,
 }
 
 float OptionExecutor::executeOption(Environment2D& env, const Option& option, int maxSteps) {
+	// Default phase is -1 (no special handling)
+	return executeOption(env, option, maxSteps, -1);
+}
+
+float OptionExecutor::executeOption(Environment2D& env, const Option& option, int maxSteps, int currentPhase) {
 	sf::Vector2i startPos = env.getRobotCell();
 	float reward = runPrimitiveUntil(env, maxSteps, option.goal(), option.policy());
 	sf::Vector2i endPos = env.getRobotCell();
@@ -56,32 +61,40 @@ float OptionExecutor::executeOption(Environment2D& env, const Option& option, in
 	// Handle ClearObstacle option specifically
 	if (option.name() == std::string("ClearObstacle")) {
 		if (env.hasObstacleNeighbor()) {
-			// Check if clearing is beneficial (prefer strategic clears)
+			// Check if clearing is beneficial
 			static const int dx[4] = {1, -1, 0, 0};
 			static const int dy[4] = {0, 0, 1, -1};
 			bool clearedSomething = false;
 			
-			// First try to clear a strategic obstacle
-			for (int k = 0; k < 4; ++k) {
-				int nx = env.getRobotCell().x + dx[k];
-				int ny = env.getRobotCell().y + dy[k];
-				if (nx >= 0 && nx < env.getGridWidth() && ny >= 0 && ny < env.getGridHeight()) {
-					sf::Vector2i obstaclePos(nx, ny);
-					if (env.isObstacle(obstaclePos) && env.shouldClearObstacle(obstaclePos)) {
-						if (env.clearAnyAdjacentObstacle()) {
-							reward += 2.0f; // Reward for strategic clearing
-							clearedSomething = true;
-							break;
+			// In Phase 2 (MoveToObject), clear ANY adjacent obstacle freely
+			if (currentPhase == 2) {
+				if (env.clearAnyAdjacentObstacle()) {
+					clearedSomething = true;
+					// No reward in phase 2 - clearing is necessary cost
+				}
+			} else {
+				// In other phases, prefer to clear strategic obstacles first
+				for (int k = 0; k < 4; ++k) {
+					int nx = env.getRobotCell().x + dx[k];
+					int ny = env.getRobotCell().y + dy[k];
+					if (nx >= 0 && nx < env.getGridWidth() && ny >= 0 && ny < env.getGridHeight()) {
+						sf::Vector2i obstaclePos(nx, ny);
+						if (env.isObstacle(obstaclePos) && env.shouldClearObstacle(obstaclePos)) {
+							if (env.clearAnyAdjacentObstacle()) {
+								reward += 2.0f; // Reward for strategic clearing
+								clearedSomething = true;
+								break;
+							}
 						}
 					}
 				}
-			}
-			// If we didn't clear anything strategic, try to clear any adjacent obstacle
-			if (!clearedSomething) {
-				if (env.clearAnyAdjacentObstacle()) {
-					reward += 1.0f; // smaller reward for non-strategic clear
-					clearedSomething = true;
-					std::cout << "Cleared adjacent obstacle (non-strategic)\n";
+				// If we didn't clear anything strategic, try to clear any adjacent obstacle
+				if (!clearedSomething) {
+					if (env.clearAnyAdjacentObstacle()) {
+						reward += 1.0f; // smaller reward for non-strategic clear
+						clearedSomething = true;
+						std::cout << "Cleared adjacent obstacle (non-strategic)\n";
+					}
 				}
 			}
 			
