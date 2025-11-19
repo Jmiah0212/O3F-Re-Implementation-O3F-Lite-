@@ -26,6 +26,8 @@ public:
 	Environment2D(unsigned int width, unsigned int height);
 
 	void reset(unsigned int numObjects);
+	// Allow external code to inform environment which episode is running
+	void setEpisodeNumber(int ep) { currentEpisode = ep; }
 	// grid step using primitive action, returns reward
 	float step(Action action);
 	// continuous physics step for legacy behavior
@@ -53,6 +55,10 @@ public:
 	bool hasObstacleNeighbor() const;
 	bool clearAnyAdjacentObstacle();
 	bool isObstacle(const sf::Vector2i& cell) const;
+
+	// Drop carried object one cell to the left (or nearest adjacent empty cell)
+	// Returns true if the object was dropped.
+	bool dropObjectLeft();
 
 	// Object / carrying helpers
 	sf::Vector2i getObjectCell() const { return objectCell; }
@@ -87,6 +93,7 @@ private:
 	sf::Vector2i targetCell;
 	sf::Vector2i objectCell;
 	bool carrying = false;
+	int currentEpisode = 0;
 
 	void resolveBoundaries(sf::Vector2f& pos, float radius);
 	float computeReward(const sf::Vector2i& prevRobotCell) const;

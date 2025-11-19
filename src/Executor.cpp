@@ -26,8 +26,9 @@ float OptionExecutor::runPrimitiveUntil(Environment2D& env, int maxSteps,
 		if (env.getRobotCell() == lastPos) {
 			stepsInSamePlace++;
 			// If stuck for 3+ steps, give up on this option
+			// Reduced penalty from -5.0 to -2.0 to be more lenient with clearing costs
 			if (stepsInSamePlace >= 3) {
-				total -= 5.0f; // Penalty for getting stuck
+				total -= 2.0f; // Reduced penalty for getting stuck
 				break;
 			}
 		} else {
@@ -54,6 +55,7 @@ float OptionExecutor::executeOption(Environment2D& env, const Option& option, in
 	sf::Vector2i endPos = env.getRobotCell();
 	
 	// Additional penalty if option didn't accomplish anything meaningful
+	// Skip this penalty for ClearObstacle in Phase 2 - not moving is expected when clearing
 	if (startPos == endPos && option.name() != "ClearObstacle") {
 		reward -= 3.0f; // Penalty for wasting time
 	}

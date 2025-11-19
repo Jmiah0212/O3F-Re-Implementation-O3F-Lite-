@@ -14,9 +14,8 @@
 
 int main(int argc, char** argv) {
 	const unsigned int W = 960, H = 600;
-	// Parse simple CLI args
 	std::string loadQPath;
-	int saveQInterval = 0; // episodes; 0 = disabled
+	int saveQInterval = 0;
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
 		if (a == "--load-q" && i + 1 < argc) {
@@ -27,19 +26,19 @@ int main(int argc, char** argv) {
 	}
 
 	Environment2D env(W, H);
+	env.setEpisodeNumber(0);
 	env.reset(5);
 
 	Visualizer viz(W, H);
-	// Configure planner with explicit hyperparameters so we can decay epsilon
+	// configure planner with explicit hyperparameters so we can decay epsilon
 	PlannerConfig plannerCfg;
 	plannerCfg.alpha = 0.1f;
 	plannerCfg.gamma = 0.95f;
-	plannerCfg.epsilon = 1.0f;      // start fully exploratory
+	plannerCfg.epsilon = 1.0f;
 	plannerCfg.epsilonDecay = 0.995f;
 	plannerCfg.epsilonMin = 0.05f;
 	OptionPlanner planner(plannerCfg);
 
-	// Optionally load a Q-table before training
 	if (!loadQPath.empty()) {
 		if (planner.loadQTable(loadQPath)) {
 			std::cout << "Loaded Q-table from " << loadQPath << std::endl;
@@ -48,7 +47,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	// Create CSV log for training results
+	// create csv log for training results
 	std::time_t now = std::time(nullptr);
 	std::tm* localTime = std::localtime(&now);
 	char filename[128];
@@ -67,34 +66,38 @@ int main(int argc, char** argv) {
 	float cumulativeReward = 0.f;
 
 	for (int episode = 0; episode < MAX_EPISODES && viz.isOpen(); ++episode) {
-		env.reset(5);
+	env.setEpisodeNumber(episode);
+	env.reset(5);
 		bool done = false;
 		float episodeReward = 0.f;
 		int optionCount = 0;
-		const int MAX_OPTIONS_PER_EPISODE = 50; // Force episode to end after 50 options
+		const int MAX_OPTIONS_PER_EPISODE = 150; // allow up to 150 options - more time for complex navigation
 		
-		// State machine: 0=ClearObstacles, 1=MoveToTarget, 2=ReturnToObject, 3=MoveObjectToTarget
+		// state machine: 0=ClearObstacles, 1=MoveToTarget, 2=ReturnToObject, 3=MoveObjectToTarget
 		int currentPhase = 0;
 		const char* phaseNames[] = {"ClearObstacle", "MoveToTarget", "ReturnToObject", "MoveObjectToTarget"};
 		
+		// track whether the robot has reached the target at least once this episode
+		bool reachedTargetOnce = false;
+
 		int stepsWithoutProgress = 0;
 		int lastDistance = std::abs(env.getRobotCell().x - env.getTargetCell().x) + 
 		                   std::abs(env.getRobotCell().y - env.getTargetCell().y);
 		
-		bool phaseJustChanged = false;  // Track if phase just changed this iteration
+		bool phaseJustChanged = false;  // track if phase just changed this iteration
 		
 		while (!done && viz.isOpen() && optionCount < MAX_OPTIONS_PER_EPISODE) {
 			bool shouldClose = false, resetRequested = false;
 			viz.pollEvents(shouldClose, resetRequested);
 			if (shouldClose) break;
 			if (resetRequested) {
+				env.setEpisodeNumber(episode);
 				env.reset(5);
 				currentPhase = 0;
 				phaseJustChanged = false;
 			}
 
-			// Check phase transition conditions FIRST, before executing any option
-			// This ensures we immediately transition when conditions are met
+			// check phase transition conditions FIRST, before executing any option
 			phaseJustChanged = false;
 			if (currentPhase == 0) {
 				// ClearObstacles phase: transition when no obstacles nearby
@@ -128,18 +131,13 @@ int main(int argc, char** argv) {
 				option = 3;
 			}
 			// Special handling for Phase 2 (ReturnToObject → MoveToObject):
-			// In phase 2, the robot must find the absolute shortest path and can clear any obstacles
-			// that are on that shortest path. Always prefer to clear when blocked.
+			// Phase 2 strategy: Clear obstacles first, then move toward object
 			else if (currentPhase == 2) {
-				// Skip clearing on the first step after transitioning to phase 2
-				if (phaseJustChanged) {
-					option = 2;  // Just do ReturnToObject without clearing
-				} else if (!env.isCarrying() && env.hasObstacleNeighbor()) {
-					// In Phase 2, always try to clear obstacles when blocked
-					// The robot will clear any obstacle adjacent to it
-					option = 0;  // ClearObstacle option
+				if (!env.isCarrying() && env.hasObstacleNeighbor()) {
+					// Always clear adjacent obstacles in Phase 2
+					option = 0;  // ClearObstacle
 				} else {
-					// No obstacles or already carrying - proceed with ReturnToObject
+					// No adjacent obstacles - move toward object using ReturnToObject
 					option = 2;
 				}
 			}
@@ -165,10 +163,22 @@ int main(int argc, char** argv) {
 			Environment2D prevState = env;
 			
 			options[option]->onSelect(env);
-			float reward = executor.executeOption(env, *options[option], 3, currentPhase);
+			float reward = executor.executeOption(env, *options[option], 5, currentPhase);
 			planner.updateQ(prevState, option, reward, env, (int)options.size());
 			episodeReward += reward;
 			cumulativeReward += reward;
+
+			// If we just picked up the object prematurely (before phase 3) AND we have NOT
+			// reached the target earlier in this episode, drop it one cell to the left so the
+			// robot can continue searching/clearing. If we've already reached the target once,
+			// allow the pickup to stand.
+			if (!prevState.isCarrying() && env.isCarrying() && currentPhase != 3 && !reachedTargetOnce) {
+				if (env.dropObjectLeft()) {
+					std::cout << "Episode " << episode << ": picked up object prematurely - dropped to left to allow searching for target." << std::endl;
+				} else {
+					std::cout << "Episode " << episode << ": attempted to drop object but no valid drop cell found; still carrying." << std::endl;
+				}
+			}
 			
 			// Debug: print reward info
 			if (episode < 3) { // Only print first 3 episodes
@@ -190,6 +200,7 @@ int main(int argc, char** argv) {
 			} else if (currentPhase == 1) {
 				if (env.getRobotCell() == env.getTargetCell()) {
 					currentPhase = 2;
+					reachedTargetOnce = true; // mark that we've reached the target at least once this episode
 					std::cout << "Episode " << episode << " - Reached target! Transitioning to ReturnToObject phase." << std::endl;
 				}
 			} else if (currentPhase == 2) {
@@ -227,23 +238,22 @@ int main(int argc, char** argv) {
 			if (currentPhase != 3) {
 				if (currentDistance >= lastDistance) {
 					stepsWithoutProgress++;
-				} else {
-					stepsWithoutProgress = 0;
-				}
-				lastDistance = currentDistance;
-				
-				// Terminate if stuck for too long (only in phases 0-2)
-				if (stepsWithoutProgress > 15) {
-					episodeReward -= 20.0f; // Penalty for getting stuck
-					std::cout << "Episode " << episode << " terminated early - stuck without progress" << std::endl;
-					break;
-				}
 			} else {
-				// In phase 3, just track current distance without penalizing backward steps
-				lastDistance = currentDistance;
+				stepsWithoutProgress = 0;
 			}
+			lastDistance = currentDistance;
 			
-			viz.renderWithOverlay(env, episode, episodeReward, (float)successfulEpisodes / (episode + 1));
+			// Terminate if stuck for too long (only in phases 0-2)
+			// Increased from 15 to 40 to allow extended obstacle clearing and navigation
+			if (stepsWithoutProgress > 40) {
+				episodeReward -= 20.0f; // Penalty for getting stuck
+				std::cout << "Episode " << episode << " terminated early - stuck without progress" << std::endl;
+				break;
+			}
+		} else {
+			// In phase 3, just track current distance without penalizing backward steps
+			lastDistance = currentDistance;
+		}			viz.renderWithOverlay(env, episode, episodeReward, (float)successfulEpisodes / (episode + 1));
 			
 			optionCount++;
 			viz.delay(50); // Reduced delay for faster decisions
@@ -255,10 +265,10 @@ int main(int argc, char** argv) {
 					  << ", Success rate: " << (float)successfulEpisodes / (episode + 1) * 100 << "%" << std::endl;
 		}
 
-		// Log episode to CSV (approximate steps as options_used * maxStepsPerOption(=3) here)
+		// Log episode to CSV (approximate steps as options_used * maxStepsPerOption(=5) here)
 		bool success = env.isTaskComplete();
 		int optionsUsed = optionCount;
-		int stepsTaken = optionsUsed * 3;
+		int stepsTaken = optionsUsed * 5; // maxStepsPerOption is now 5
 		if (csv.is_open()) {
 			csv << episode << "," 
 				<< std::fixed << std::setprecision(4) << episodeReward << "," 

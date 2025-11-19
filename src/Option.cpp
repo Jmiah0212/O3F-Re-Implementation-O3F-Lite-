@@ -251,7 +251,69 @@ static std::vector<sf::Vector2i> bfsFullPath(const Environment2D& env, const sf:
 	return path;
 }
 
-// BFS to find the next action along a shortest path to `target` avoiding obstacles.
+// BFS to find next action toward target, ignoring ALL obstacles
+// Used for Phase 2 (MoveToObject) where we want BFS to find path and clear obstacles
+static Action bfsNextActionIgnoringObstacles(const Environment2D& env, const sf::Vector2i& target) {
+	int w = env.getGridWidth();
+	int h = env.getGridHeight();
+	auto start = env.getRobotCell();
+	if (start == target) return Action::None;
+
+	auto idx = [&](int x, int y){ return y * w + x; };
+
+	std::vector<int> parent(w * h, -1);
+	std::queue<int> q;
+	int s = idx(start.x, start.y);
+	int g = idx(target.x, target.y);
+	q.push(s);
+	parent[s] = s;
+
+	static const int dx[4] = {1, -1, 0, 0};
+	static const int dy[4] = {0, 0, 1, -1};
+
+	bool found = false;
+	while (!q.empty()) {
+		int cur = q.front(); q.pop();
+		int cx = cur % w;
+		int cy = cur / w;
+		for (int k = 0; k < 4; ++k) {
+			int nx = cx + dx[k];
+			int ny = cy + dy[k];
+			if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+			// Avoid boundary cells
+			if (isBoundaryCell({nx, ny}, w, h)) continue;
+			int ni = idx(nx, ny);
+			if (parent[ni] != -1) continue;
+			// IGNORE OBSTACLES - BFS will find path through them
+			parent[ni] = cur;
+			if (ni == g) { found = true; break; }
+			q.push(ni);
+		}
+		if (found) break;
+	}
+
+	if (!found) return Action::None;
+
+	// Reconstruct path: from goal back to start, take the first step after start
+	int cur = g;
+	int prev = parent[cur];
+	while (prev != s) {
+		cur = prev;
+		prev = parent[cur];
+	}
+	int nextX = cur % w;
+	int nextY = cur / w;
+
+	int rx = start.x;
+	int ry = start.y;
+	if (nextX == rx + 1 && nextY == ry) return Action::Right;
+	if (nextX == rx - 1 && nextY == ry) return Action::Left;
+	if (nextX == rx && nextY == ry + 1) return Action::Down;
+	if (nextX == rx && nextY == ry - 1) return Action::Up;
+	return Action::None;
+}
+
+// BFS to find next action toward target, respecting obstacles
 static Action bfsNextAction(const Environment2D& env, const sf::Vector2i& target) {
 	int w = env.getGridWidth();
 	int h = env.getGridHeight();
@@ -371,10 +433,12 @@ std::function<bool(const Environment2D&)> ClearObstacleOption::goal() const {
 
 std::function<Action(const Environment2D&)> ClearObstacleOption::policy() const {
 	return [](const Environment2D& e) {
-		// This option should only execute when there's an obstacle to clear
-		if (!e.hasObstacleNeighbor()) {
-			// Move toward target if no obstacle nearby
-			return smartPathfinding(e, e.getTargetCell());
+		// CRITICAL: When there are obstacles nearby, return Action::None 
+		// This tells the Executor to clear obstacles without moving the robot
+		// The Executor.cpp handles the actual obstacle clearing in executeOption()
+		if (e.hasObstacleNeighbor()) {
+			// Stay in place - let Executor.executeOption() handle clearing
+			return Action::None;
 		}
 
 		// If carrying, do not attempt to clear; instead move toward target
@@ -382,39 +446,8 @@ std::function<Action(const Environment2D&)> ClearObstacleOption::policy() const 
 			return smartPathfinding(e, e.getTargetCell());
 		}
 		
-		// Find and approach the most strategic obstacle
-		static const int dx[4] = {1, -1, 0, 0};
-		static const int dy[4] = {0, 0, 1, -1};
-		
-		sf::Vector2i bestObstacle = e.getRobotCell();
-		bool foundStrategicObstacle = false;
-		
-		for (int k = 0; k < 4; ++k) {
-			int nx = e.getRobotCell().x + dx[k];
-			int ny = e.getRobotCell().y + dy[k];
-			if (nx >= 0 && nx < e.getGridWidth() && ny >= 0 && ny < e.getGridHeight()) {
-				sf::Vector2i obstaclePos(nx, ny);
-					// Consider obstacle strategic if it's useful to clear for the global
-					// target OR (when not carrying) for the object (so ReturnToObject can
-					// make progress). This prevents ClearObstacle from opportunistically
-					// clearing obstacles that don't help reach the object.
-					if (e.isObstacle(obstaclePos) && (
-						 e.shouldClearObstacle(obstaclePos) ||
-						 (!e.isCarrying() && e.shouldClearObstacleToward(obstaclePos, e.getObjectCell())))) {
-					bestObstacle = obstaclePos;
-					foundStrategicObstacle = true;
-					break;
-				}
-			}
-		}
-		
-		if (foundStrategicObstacle) {
-			// We're adjacent to strategic obstacle - stay and clear it
-			return Action::None;
-		} else {
-			// No strategic obstacle nearby - move toward target
-			return smartPathfinding(e, e.getTargetCell());
-		}
+		// No obstacles nearby - move toward target to find more
+		return smartPathfinding(e, e.getTargetCell());
 	};
 }
 
@@ -440,13 +473,8 @@ std::function<bool(const Environment2D&)> MoveToObjectOption::goal() const {
 
 std::function<Action(const Environment2D&)> MoveToObjectOption::policy() const {
 	return [this](const Environment2D& e) { 
-		// Always use BFS for moving to object to ensure shortest path
-		Action action = bfsNextAction(e, e.getObjectCell());
-		
-		// If BFS returns None (path blocked by obstacles), move toward the blocking obstacle
-		if (action == Action::None && e.getRobotCell() != e.getObjectCell()) {
-			action = findNextActionTowardBlockingObstacle(e, e.getObjectCell());
-		}
+		// Use BFS ignoring obstacles - we'll clear obstacles in Phase 2 via ClearObstacle option
+		Action action = bfsNextActionIgnoringObstacles(e, e.getObjectCell());
 		
 		// Track move history
 		updateMoveHistory(moveHistory, consecutiveRepeatedMoves, action);
@@ -566,63 +594,15 @@ std::function<bool(const Environment2D&)> ReturnToObjectOption::goal() const {
 
 std::function<Action(const Environment2D&)> ReturnToObjectOption::policy() const {
 	return [this](const Environment2D& e) {
-		Action a;
+		// In Phase 2, ClearObstacle is run before this option, but obstacles might still be present
+		// Use obstacle-ignoring BFS to find optimal direction toward object
+		// The ClearObstacle option will systematically clear obstacles that block this path
+		Action a = bfsNextActionIgnoringObstacles(e, e.getObjectCell());
 		
-		// Try deterministic BFS toward the object first
-		a = bfsNextAction(e, e.getObjectCell());
-		if (a != Action::None) {
-			// Track the move
-			updateMoveHistory(moveHistory, consecutiveRepeatedMoves, a);
-			return a;
-		}
-
-		// If stuck in loop trying BFS, reset strategy counter and try obstacle approach
-		if (isStuckInLoop(consecutiveRepeatedMoves)) {
-			consecutiveRepeatedMoves = 0;
-		}
-
-		// If blocked, attempt to approach a strategic obstacle so ClearObstacle can act
-		const int maxSearchRadius = 8;
-		sf::Vector2i robot = e.getRobotCell();
-		sf::Vector2i object = e.getObjectCell();
-
-		bool found = false;
-		sf::Vector2i bestObs(0,0);
-		float bestScore = std::numeric_limits<float>::infinity();
-
-		for (int dx = -maxSearchRadius; dx <= maxSearchRadius; ++dx) {
-			for (int dy = -maxSearchRadius; dy <= maxSearchRadius; ++dy) {
-				sf::Vector2i pos(robot.x + dx, robot.y + dy);
-				if (pos.x < 0 || pos.x >= e.getGridWidth() || pos.y < 0 || pos.y >= e.getGridHeight()) continue;
-				if (!e.isObstacle(pos)) continue;
-
-				float dr = std::hypot((float)(pos.x - robot.x), (float)(pos.y - robot.y));
-				float do_ = std::hypot((float)(pos.x - object.x), (float)(pos.y - object.y));
-				float score = dr + 0.5f * do_;
-
-				if (score < bestScore) {
-					bestScore = score;
-					bestObs = pos;
-					found = true;
-				}
-			}
-		}
-
-		if (!found) return Action::None;
-
-		static const int ndx[4] = {1, -1, 0, 0};
-		static const int ndy[4] = {0, 0, 1, -1};
-		for (int k = 0; k < 4; ++k) {
-			sf::Vector2i adj(bestObs.x + ndx[k], bestObs.y + ndy[k]);
-			if (adj.x < 0 || adj.x >= e.getGridWidth() || adj.y < 0 || adj.y >= e.getGridHeight()) continue;
-			if (e.isObstacle(adj)) continue;
-			a = bfsNextAction(e, adj);
-			// Track the move
-			updateMoveHistory(moveHistory, consecutiveRepeatedMoves, a);
-			return a;
-		}
-
-		return Action::None;
+		// Track the move
+		updateMoveHistory(moveHistory, consecutiveRepeatedMoves, a);
+		
+		return a;
 	};
 }
 

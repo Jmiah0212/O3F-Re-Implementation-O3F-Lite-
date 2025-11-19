@@ -46,6 +46,18 @@ void Environment2D::reset(unsigned int numObjects) {
 	std::uniform_int_distribution<int> objX(2, std::max(2, gridW/2 - 2));
 	std::uniform_int_distribution<int> objY(2, gridH - 3);
 	objectCell = {objX(rng), objY(rng)};
+
+	// If we've passed episode 10, place the object on the same horizontal line as the target
+	// (i.e., match the object's y to the target's y) to make the task easier/consistent
+	if (currentEpisode >= 10) {
+		objectCell.y = targetCell.y;
+		// Make sure the object isn't placed on top of the target or robot; if it is, shift left
+		if (objectCell == targetCell || objectCell == robotCell) {
+			objectCell.x = std::max(2, targetCell.x - 3);
+		}
+		// Clamp within bounds
+		objectCell.x = std::min(std::max(objectCell.x, 2), gridW - 3);
+	}
 	carrying = false;
 	
 	// Generate obstacles
@@ -113,6 +125,33 @@ bool Environment2D::clearAnyAdjacentObstacle() {
 	return false;
 }
 
+bool Environment2D::dropObjectLeft() {
+	if (!carrying) return false;
+	// preferred drop is one cell to the left
+	std::vector<sf::Vector2i> candidates;
+	candidates.push_back({robotCell.x - 1, robotCell.y}); // left
+	candidates.push_back({robotCell.x - 1, robotCell.y - 1}); // left-up
+	candidates.push_back({robotCell.x - 1, robotCell.y + 1}); // left-down
+	candidates.push_back({robotCell.x, robotCell.y - 1}); // up
+	candidates.push_back({robotCell.x, robotCell.y + 1}); // down
+	candidates.push_back({robotCell.x + 1, robotCell.y}); // right
+
+	for (const auto& c : candidates) {
+		if (c.x < 0 || c.x >= gridW || c.y < 0 || c.y >= gridH) continue;
+		// don't drop on target
+		if (c == targetCell) continue;
+		// cell must be empty (not obstacle, not robot)
+		if (grid[idx(c.x, c.y)] == CellType::Empty) {
+			objectCell = c;
+			grid[idx(objectCell.x, objectCell.y)] = CellType::Object;
+			carrying = false;
+			std::cout << "Env: robot dropped object at (" << objectCell.x << "," << objectCell.y << ")" << std::endl;
+			return true;
+		}
+	}
+	return false;
+}
+
 float Environment2D::computeReward(const sf::Vector2i& prevRobotCell) const {
 	float r = 0.f;
 	
@@ -121,8 +160,9 @@ float Environment2D::computeReward(const sf::Vector2i& prevRobotCell) const {
 		return 50.f; // Big reward to end episode
 	}
 	
-	// 2. Small time penalty per step (encourage efficiency but not too harsh)
-	r -= 0.1f;
+	// 2. Reduced time penalty per step (allow extra steps for obstacle clearing)
+	// Changed from -0.1 to -0.05 to be more lenient with clearing costs
+	r -= 0.05f;
 	
 	// 3. Obstacle collision penalty
 	if (isObstacle(robotCell)) {
